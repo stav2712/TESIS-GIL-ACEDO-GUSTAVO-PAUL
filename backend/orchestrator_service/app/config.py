@@ -1,25 +1,21 @@
 from pydantic_settings import BaseSettings
-from pathlib import Path
 
 class Settings(BaseSettings):
-    # JWT / auth
+    # JWT (lo emite Identity /auth; aquí solo se valida y extrae user_id) :contentReference[oaicite:4]{index=4}
     JWT_SECRET: str
     JWT_ALG: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
-    # DBs (separadas: auth vs clínica)
-    AUTH_DB_URL: str = "sqlite:///./data/auth.db"
-    CLINICAL_DB_URL: str = "sqlite:///./data/clinical.db"
+    # Servicios según arquitectura: /translate y gestor SQL /execute :contentReference[oaicite:5]{index=5}
+    TRANSLATOR_URL: str
+    QUERY_URL: str
 
-    # Logs (NoSQL documental -> por ahora JSON)
-    LOG_DB_PATH: str = "./data/logs.json"
+    # Logs NoSQL (MongoDB) :contentReference[oaicite:6]{index=6}
+    MONGO_URI: str
+    MONGO_DB: str = "nl2sql_logs"
+    MONGO_COLLECTION: str = "queries"
 
-    # Translator service
-    TRANSLATOR_URL: str = "http://127.0.0.1:8001/translate"
-    DB_DIALECT: str = "sqlite"
-
-    # Guardrails
-    ALLOWED_TABLES: str = "patients,encounters,diagnoses,lab_results,medications"
+    # Export
+    EXPORT_MAX_ROWS: int = 10000  # coherente con NFR (hasta 10k registros) :contentReference[oaicite:7]{index=7}
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173"
@@ -28,4 +24,3 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
-Path("data").mkdir(exist_ok=True)

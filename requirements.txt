@@ -8,3 +8,5 @@ httpx
 tinydb
 openpyxl
 reportlab
+pymongo
+honcho
