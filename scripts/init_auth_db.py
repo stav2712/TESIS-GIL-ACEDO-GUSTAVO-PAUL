@@ -1,8 +1,6 @@
 import sqlite3
 from pathlib import Path
-from passlib.context import CryptContext
-
-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from passlib.hash import pbkdf2_sha256
 
 Path("data").mkdir(exist_ok=True)
 db_path = Path("data/auth.db")
@@ -22,10 +20,9 @@ CREATE TABLE users (
 );
 """)
 
-# usuarios de prueba
 users = [
-    ("admin", pwd.hash("admin123"), "admin"),
-    ("doctor1", pwd.hash("doctor123"), "user"),
+    ("admin", pbkdf2_sha256.hash("admin123"), "admin"),
+    ("doctor1", pbkdf2_sha256.hash("doctor123"), "user"),
 ]
 cur.executemany("INSERT INTO users(username, password_hash, role) VALUES (?,?,?)", users)
 

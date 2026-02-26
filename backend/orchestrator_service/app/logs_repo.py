@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from pymongo import MongoClient, ASCENDING
+from pymongo.errors import ServerSelectionTimeoutError
 from .config import settings
 
 class MongoLogsRepo:
@@ -9,9 +10,13 @@ class MongoLogsRepo:
     Feedback inicia nulo y luego se actualiza según pulgar arriba/abajo. :contentReference[oaicite:13]{index=13}
     """
     def __init__(self):
-        self.client = MongoClient(settings.MONGO_URI)
+        self.client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=2000)
+        try:
+            self.client.admin.command("ping")
+        except ServerSelectionTimeoutError:
+            raise RuntimeError("MongoDB no está corriendo (revisa MONGO_URI o levanta MongoDB).")
+
         self.col = self.client[settings.MONGO_DB][settings.MONGO_COLLECTION]
-        # índices útiles
         self.col.create_index([("report_id", ASCENDING)], unique=True)
         self.col.create_index([("user_id", ASCENDING), ("timestamp", ASCENDING)])
 
