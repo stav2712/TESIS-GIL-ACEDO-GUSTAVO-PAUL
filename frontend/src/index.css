@@ -28,3 +28,41 @@
     height: calc(100vh / var(--ui-scale));
   }
 }
+
+/* Scrollbar sutil (solo para elementos que tengan esta clase) */
+.scrollbar-subtle {
+  scrollbar-width: thin;                 /* Firefox */
+  scrollbar-color: rgba(255,255,255,.28) transparent;
+}
+
+.scrollbar-subtle::-webkit-scrollbar {
+  width: 10px;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,.22);
+  border-radius: 9999px;
+  border: 3px solid transparent;         /* lo hace más “delgadito” */
+  background-clip: content-box;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255,255,255,.38);
+}
+
+/* En dark, un poquito más slate */
+.dark .scrollbar-subtle {
+  scrollbar-color: rgba(148,163,184,.35) transparent;
+}
+
+.dark .scrollbar-subtle::-webkit-scrollbar-thumb {
+  background-color: rgba(148,163,184,.22);
+}
+
+.dark .scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148,163,184,.38);
+}

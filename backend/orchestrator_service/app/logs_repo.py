@@ -1,44 +1,139 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from pymongo import MongoClient, ASCENDING
-from pymongo.errors import ServerSelectionTimeoutError
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from .config import settings
 
-class MongoLogsRepo:
-    """
-    Repositorio NoSQL (MongoDB) con campos {usuario, NL, SQL, timestamp, latencia, feedback}. :contentReference[oaicite:12]{index=12}
-    Feedback inicia nulo y luego se actualiza según pulgar arriba/abajo. :contentReference[oaicite:13]{index=13}
-    """
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def default_title(nl: str) -> str:
+    t = nl.strip()
+    return (t[:40] + "…") if len(t) > 40 else (t or "Nuevo reporte")
+
+class MongoRepo:
     def __init__(self):
         self.client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=2000)
-        try:
-            self.client.admin.command("ping")
-        except ServerSelectionTimeoutError:
-            raise RuntimeError("MongoDB no está corriendo (revisa MONGO_URI o levanta MongoDB).")
+        self.client.admin.command("ping")
 
-        self.col = self.client[settings.MONGO_DB][settings.MONGO_COLLECTION]
-        self.col.create_index([("report_id", ASCENDING)], unique=True)
-        self.col.create_index([("user_id", ASCENDING), ("timestamp", ASCENDING)])
+        db = self.client[settings.MONGO_DB]
+        self.reports = db[settings.MONGO_COLLECTION]
+        self.convs = db[settings.MONGO_CONVERSATIONS_COLLECTION]
 
-    def create_log(self, user_id: int, nl: str, sql: str, latency_ms: int) -> str:
-        report_id = str(uuid4())
+        self.reports.create_index([("report_id", ASCENDING)], unique=True)
+        self.reports.create_index([("user_id", ASCENDING), ("conversation_id", ASCENDING), ("timestamp", ASCENDING)])
+        self.convs.create_index([("conversation_id", ASCENDING)], unique=True)
+        self.convs.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
+
+    # ---------- Conversations ----------
+    def create_conversation(self, user_id: int, title: str | None) -> dict:
+        cid = str(uuid4())
         doc = {
-            "report_id": report_id,
-            "user_id": user_id,          # usuario
-            "nl": nl,                    # NL
-            "sql": sql,                  # SQL
-            "timestamp": datetime.now(timezone.utc).isoformat(),  # timestamp
-            "latency_ms": latency_ms,    # latencia
-            "feedback": None,            # feedback (inicia nulo) :contentReference[oaicite:14]{index=14}
+            "conversation_id": cid,
+            "user_id": user_id,
+            "title": title or "Nuevo reporte",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "deleted": False,
+            "deleted_at": None,
+            "selected_report_id": None,
+            "last_preview": None,
         }
-        self.col.insert_one(doc)
-        return report_id
+        self.convs.insert_one(doc)
+        return {k: doc[k] for k in doc if k != "_id"}
 
-    def set_feedback(self, report_id: str, value: str) -> bool:
-        # value: "up" | "down"
-        feedback = "positive" if value == "up" else "negative"
-        res = self.col.update_one({"report_id": report_id}, {"$set": {"feedback": feedback}})
+    def list_conversations(self, user_id: int) -> list[dict]:
+        cur = self.convs.find(
+            {"user_id": user_id, "deleted": False},
+            {"_id": 0}
+        ).sort("updated_at", DESCENDING)
+        return list(cur)
+
+    def get_conversation(self, user_id: int, conversation_id: str) -> dict | None:
+        return self.convs.find_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
+            {"_id": 0}
+        )
+
+    def rename_conversation(self, user_id: int, conversation_id: str, title: str) -> bool:
+        res = self.convs.update_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
+            {"$set": {"title": title, "updated_at": now_iso()}}
+        )
         return res.modified_count == 1
 
-    def get_log(self, report_id: str) -> dict | None:
-        return self.col.find_one({"report_id": report_id}, {"_id": 0})
+    def delete_conversation(self, user_id: int, conversation_id: str) -> bool:
+        res = self.convs.update_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
+            {"$set": {"deleted": True, "deleted_at": now_iso()}}
+        )
+        return res.modified_count == 1
+
+    def select_report(self, user_id: int, conversation_id: str, report_id: str) -> bool:
+        # solo permite seleccionar un reporte del mismo usuario/conv
+        ok = self.reports.find_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "report_id": report_id},
+            {"_id": 0, "report_id": 1}
+        )
+        if not ok:
+            return False
+        res = self.convs.update_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
+            {"$set": {"selected_report_id": report_id, "updated_at": now_iso()}}
+        )
+        return res.modified_count == 1
+
+    # ---------- Reports ----------
+    def add_report(self, user_id: int, conversation_id: str, nl: str, sql: str, latency_ms: int) -> dict:
+        rid = str(uuid4())
+        ts = now_iso()
+        doc = {
+            "report_id": rid,
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "nl": nl,
+            "sql": sql,
+            "timestamp": ts,
+            "latency_ms": latency_ms,
+            "feedback": None,  # "positive" | "negative"
+        }
+        self.reports.insert_one(doc)
+
+        # actualiza conversación
+        preview = default_title(nl)
+        self.convs.update_one(
+            {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
+            {"$set": {"updated_at": ts, "last_preview": preview}}
+        )
+
+        # si no hay seleccionado, selecciona el primero automáticamente
+        conv = self.convs.find_one({"user_id": user_id, "conversation_id": conversation_id}, {"_id": 0})
+        if conv and not conv.get("selected_report_id"):
+            self.convs.update_one(
+                {"user_id": user_id, "conversation_id": conversation_id},
+                {"$set": {"selected_report_id": rid}}
+            )
+
+        return {k: doc[k] for k in doc if k != "_id"}
+
+    def list_reports(self, user_id: int, conversation_id: str) -> list[dict]:
+        cur = self.reports.find(
+            {"user_id": user_id, "conversation_id": conversation_id},
+            {"_id": 0}
+        ).sort("timestamp", ASCENDING)
+        return list(cur)
+
+    def get_report(self, user_id: int, report_id: str) -> dict | None:
+        return self.reports.find_one(
+            {"user_id": user_id, "report_id": report_id},
+            {"_id": 0}
+        )
+
+    def set_feedback(self, user_id: int, report_id: str, value: str) -> bool:
+        if value not in ("up", "down"):
+            return False
+        fb = "positive" if value == "up" else "negative"
+        res = self.reports.update_one(
+            {"user_id": user_id, "report_id": report_id},
+            {"$set": {"feedback": fb}}
+        )
+        return res.modified_count == 1
