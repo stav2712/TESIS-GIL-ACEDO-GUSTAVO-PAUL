@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from .sql_client import execute_sql
 from .config import settings
 from .security import require_user_id
 from .models import QueryIn, QueryOut, FeedbackIn
