@@ -1,5 +1,17 @@
 from pydantic import BaseModel, Field
 
+class ResolvedTermOut(BaseModel):
+    surface: str
+    canonical: str
+    category: str | None = None
+    codes: list[str] = []
+    matched_alias: str | None = None
+
+class ResolvedValueOut(BaseModel):
+    field: str
+    canonical: str
+    matched_alias: str | None = None
+
 class QueryIn(BaseModel):
     nl: str = Field(min_length=1)
     conversation_id: str | None = None
@@ -18,6 +30,11 @@ class QueryOut(BaseModel):
     page_size: int
     row_count: int
     selected_report_id: str | None = None
+    nl_normalized: str | None = None
+    schema_profile: str | None = None
+    resolved_terms: list[ResolvedTermOut] = []
+    resolved_values: list[ResolvedValueOut] = []
+    translator_strategy: str | None = None
 
 class FeedbackIn(BaseModel):
     value: str  # "up" | "down"
@@ -48,6 +65,11 @@ class ReportMetaOut(BaseModel):
     timestamp: str
     latency_ms: int
     feedback: str | None = None
+    nl_normalized: str | None = None
+    schema_profile: str | None = None
+    resolved_terms: list[ResolvedTermOut] = []
+    resolved_values: list[ResolvedValueOut] = []
+    translator_strategy: str | None = None
 
 class ConversationDetailOut(BaseModel):
     conversation: ConversationOut

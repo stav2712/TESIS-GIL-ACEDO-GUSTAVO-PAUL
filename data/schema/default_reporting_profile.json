@@ -1,0 +1,69 @@
+{
+  "profile_name": "omop_reporting_es_v1",
+  "dialect": "postgresql",
+  "allowed_tables": [
+    "reporting.vw_pacientes",
+    "reporting.vw_profesionales",
+    "reporting.vw_centros_atencion",
+    "reporting.vw_encuentros",
+    "reporting.vw_diagnosticos",
+    "reporting.vw_procedimientos",
+    "reporting.vw_medicamentos",
+    "reporting.vw_mediciones",
+    "reporting.vw_observaciones",
+    "reporting.vw_cobertura_pagador",
+    "reporting.vw_eventos_clinicos",
+    "reporting.vw_paciente_360"
+  ],
+  "views": {
+    "reporting.vw_pacientes": {
+      "description": "Pacientes con sexo, edad y fecha de nacimiento aproximada.",
+      "columns": {
+        "id_paciente": {"aliases_es": ["paciente", "id paciente"], "aliases_en": ["patient id"]},
+        "edad_actual": {"aliases_es": ["edad", "años"], "aliases_en": ["age"]},
+        "genero_estandar": {"aliases_es": ["sexo", "género"], "aliases_en": ["sex", "gender"]},
+        "fecha_nacimiento_aprox": {"aliases_es": ["fecha de nacimiento"], "aliases_en": ["birth date"]}
+      }
+    },
+    "reporting.vw_encuentros": {
+      "description": "Encuentros clínicos y tipo de atención.",
+      "columns": {
+        "id_encuentro": {"aliases_es": ["encuentro", "atención", "consulta"], "aliases_en": ["visit", "encounter"]},
+        "id_paciente": {"aliases_es": ["paciente"], "aliases_en": ["patient"]},
+        "fecha_inicio": {"aliases_es": ["fecha", "inicio"], "aliases_en": ["start date"]},
+        "tipo_encuentro_estandar": {"aliases_es": ["tipo de encuentro", "tipo de atención"], "aliases_en": ["visit type"]}
+      }
+    },
+    "reporting.vw_diagnosticos": {
+      "description": "Diagnósticos o condiciones clínicas registradas.",
+      "columns": {
+        "id_diagnostico": {"aliases_es": ["diagnóstico"], "aliases_en": ["diagnosis"]},
+        "id_paciente": {"aliases_es": ["paciente"], "aliases_en": ["patient"]},
+        "id_encuentro": {"aliases_es": ["encuentro"], "aliases_en": ["visit"]},
+        "fecha_inicio": {"aliases_es": ["fecha diagnóstico"], "aliases_en": ["diagnosis date"]},
+        "diagnostico_estandar": {"aliases_es": ["diagnóstico", "condición"], "aliases_en": ["condition", "diagnosis"]},
+        "codigo_fuente": {"aliases_es": ["código", "icd10"], "aliases_en": ["code", "icd10"]}
+      }
+    },
+    "reporting.vw_medicamentos": {
+      "description": "Exposición a medicamentos.",
+      "columns": {
+        "id_medicamento": {"aliases_es": ["medicamento"], "aliases_en": ["drug"]},
+        "id_paciente": {"aliases_es": ["paciente"], "aliases_en": ["patient"]},
+        "fecha_inicio": {"aliases_es": ["fecha inicio"], "aliases_en": ["start date"]},
+        "medicamento_estandar": {"aliases_es": ["medicamento"], "aliases_en": ["drug name"]}
+      }
+    },
+    "reporting.vw_mediciones": {
+      "description": "Laboratorios y mediciones cuantitativas.",
+      "columns": {
+        "id_medicion": {"aliases_es": ["medición", "laboratorio"], "aliases_en": ["measurement", "lab"]},
+        "id_paciente": {"aliases_es": ["paciente"], "aliases_en": ["patient"]},
+        "fecha_medicion": {"aliases_es": ["fecha medición"], "aliases_en": ["measurement date"]},
+        "medicion_estandar": {"aliases_es": ["tipo de medición"], "aliases_en": ["measurement type"]},
+        "valor_numerico": {"aliases_es": ["valor", "resultado"], "aliases_en": ["numeric value", "result"]},
+        "unidad_estandar": {"aliases_es": ["unidad"], "aliases_en": ["unit"]}
+      }
+    }
+  }
+}

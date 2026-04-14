@@ -1,0 +1,4 @@
+field,canonical,aliases_es,aliases_en
+tipo_encuentro,emergencia,emergencia;urgencias,emergency;er
+tipo_encuentro,consulta,consulta;consulta externa;ambulatoria,outpatient;clinic
+tipo_encuentro,hospitalización,hospitalización;hospitalizacion,inpatient;hospitalization
