@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 from time import perf_counter
 
 from fastapi import HTTPException
 
+from .config import settings
 from .logs_repo import MongoRepo, default_title
-from .schema_registry import load_schema_profile
+from .schema_loader import load_schema_profile
 from .sql_client import execute_sql
-from .terminology_client import normalize_nl
 from .translator_client import translate_nl_to_sql
 
 repo = MongoRepo()
@@ -19,39 +21,34 @@ async def run_query_flow(user_id: int, nl: str, conversation_id: str | None, pag
         conv = repo.create_conversation(user_id, default_title(nl))
         conversation_id = conv["conversation_id"]
 
-    schema_profile = load_schema_profile()
-    normalization = await normalize_nl(nl)
-
-    translate_payload = {
-        "nl": nl,
-        "nl_original": nl,
-        "nl_normalized": normalization.get("normalized") or nl,
-        "resolved_terms": normalization.get("resolved_terms", []),
-        "resolved_values": normalization.get("resolved_values", []),
-        "schema_profile": schema_profile.get("profile_name"),
-        "schema_context": schema_profile,
-    }
+    schema = load_schema_profile(settings.SCHEMA_PROFILE_PATH)
 
     t0 = perf_counter()
-    translation = await translate_nl_to_sql(translate_payload)
-    sql = translation["sql"]
+    tr = await translate_nl_to_sql(
+        nl=nl,
+        schema_profile=schema.get("profile_name"),
+        schema_context=schema,
+    )
+    sql = tr["sql"]
     data = await execute_sql(sql, page=page, page_size=page_size)
     latency_ms = int((perf_counter() - t0) * 1000)
 
     report_doc = repo.add_report(
         user_id,
         conversation_id,
-        nl,
-        sql,
-        latency_ms,
-        nl_normalized=translation.get("normalized") or normalization.get("normalized"),
-        schema_profile=schema_profile.get("profile_name"),
-        resolved_terms=translation.get("resolved_terms") or normalization.get("resolved_terms", []),
-        resolved_values=translation.get("resolved_values") or normalization.get("resolved_values", []),
-        translator_strategy=translation.get("strategy"),
+        nl=nl,
+        sql=sql,
+        latency_ms=latency_ms,
+        meta={
+            "nl_normalized": tr.get("normalized"),
+            "resolved_terms": tr.get("resolved_terms", []),
+            "resolved_values": tr.get("resolved_values", []),
+            "schema_profile": tr.get("schema_profile"),
+            "translation_strategy": tr.get("strategy"),
+        },
     )
-    conv2 = repo.get_conversation(user_id, conversation_id)
 
+    conv2 = repo.get_conversation(user_id, conversation_id)
     return {
         "conversation_id": conversation_id,
         "report_id": report_doc["report_id"],
@@ -64,9 +61,5 @@ async def run_query_flow(user_id: int, nl: str, conversation_id: str | None, pag
         "page_size": data.get("page_size", page_size),
         "row_count": data.get("row_count", len(data["rows"])),
         "selected_report_id": conv2.get("selected_report_id") if conv2 else None,
-        "nl_normalized": report_doc.get("nl_normalized"),
-        "schema_profile": report_doc.get("schema_profile"),
-        "resolved_terms": report_doc.get("resolved_terms", []),
-        "resolved_values": report_doc.get("resolved_values", []),
-        "translator_strategy": report_doc.get("translator_strategy"),
+        "translation_strategy": tr.get("strategy"),
     }

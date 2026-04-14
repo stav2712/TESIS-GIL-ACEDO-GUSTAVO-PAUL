@@ -35,18 +35,20 @@ def build_text_filters(columns: list[str], terms: list[str], codes: list[str] | 
         for col in columns:
             predicates.append(f"LOWER(COALESCE({col}, '')) LIKE '%{q(term)}%'")
     for code in codes or []:
-        predicates.append(f"LOWER(COALESCE(d.codigo_fuente, '')) = '{q(code.lower())}'")
+        code = str(code).strip().lower()
+        if code:
+            predicates.append(f"LOWER(COALESCE(d.codigo_fuente, '')) = '{q(code)}'")
     return " OR ".join(dict.fromkeys(predicates)) or "1=1"
 
 def current_period_filter(column: str, text: str) -> str:
     t = text.lower()
-    if "este año" in t:
+    if "este año" in t or "este ano" in t:
         return f"EXTRACT(YEAR FROM {column}) = EXTRACT(YEAR FROM CURRENT_DATE)"
-    if "año pasado" in t:
+    if "año pasado" in t or "ano pasado" in t:
         return f"EXTRACT(YEAR FROM {column}) = EXTRACT(YEAR FROM CURRENT_DATE) - 1"
     if "este mes" in t:
         return f"{column} >= DATE_TRUNC('month', CURRENT_DATE)"
-    if "mes pasado" in t or "último mes" in t:
+    if "mes pasado" in t or "último mes" in t or "ultimo mes" in t:
         return (
             f"{column} >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') "
             f"AND {column} < DATE_TRUNC('month', CURRENT_DATE)"
@@ -75,9 +77,12 @@ def detect_age_clause(text: str, alias: str = "p") -> str:
 def detect_encounter_filters(text: str, resolved_values: list[dict[str, Any]]) -> list[str]:
     t = text.lower()
     wanted: set[str] = set()
+
     for item in resolved_values:
         if item.get("field") == "tipo_encuentro":
-            wanted.add(str(item.get("canonical", "")).lower())
+            canonical = str(item.get("canonical", "")).lower().strip()
+            if canonical:
+                wanted.add(canonical)
 
     if "emergencia" in t or "emergency" in t:
         wanted.add("emergencia")
@@ -104,9 +109,10 @@ def generate_sql_from_rules(
     tl = text.lower()
     age_clause = detect_age_clause(tl, alias="p")
 
-    if "diagnostico" in tl or "diabetes" in tl or "hipertension" in tl or "infarto" in tl or "asma" in tl:
-        terms = [str(x.get("canonical", "")).lower() for x in resolved_terms if x.get("canonical")]
-        codes = [str(c).lower() for x in resolved_terms for c in x.get("codes", [])]
+    terms = [str(x.get("canonical", "")).lower() for x in resolved_terms if x.get("canonical")]
+    codes = [str(code).lower() for x in resolved_terms for code in x.get("codes", [])]
+
+    if any(word in tl for word in ["diagnóstico", "diagnostico", "diabetes", "hipertension", "hipertensión", "infarto", "asma", "condición", "condicion"]):
         diag_filter = build_text_filters(
             ["d.diagnostico_estandar", "d.diagnostico_fuente_estandar", "d.codigo_fuente"],
             terms,
@@ -118,11 +124,14 @@ def generate_sql_from_rules(
         SELECT DISTINCT
             p.id_paciente,
             p.edad_actual,
+            p.genero_estandar,
             d.id_diagnostico,
             d.fecha_inicio,
             d.diagnostico_estandar,
+            d.codigo_fuente,
             e.id_encuentro,
-            e.tipo_encuentro_estandar
+            e.tipo_encuentro_estandar,
+            e.fecha_inicio AS fecha_encuentro
         FROM reporting.vw_pacientes p
         JOIN reporting.vw_diagnosticos d
           ON d.id_paciente = p.id_paciente
@@ -136,11 +145,36 @@ def generate_sql_from_rules(
         """
         return TranslationResult(sql=apply_limit(sql), strategy="rules_diagnosis")
 
+    if any(word in tl for word in ["medición", "medicion", "laboratorio", "glucosa", "hemoglobina", "presión arterial", "presion arterial"]):
+        measure_filter = build_text_filters(
+            ["m.medicion_estandar", "m.medicion_fuente_estandar", "m.codigo_fuente"],
+            terms,
+            codes,
+        )
+        sql = f"""
+        SELECT
+            m.id_medicion,
+            m.id_paciente,
+            m.id_encuentro,
+            m.fecha_medicion,
+            m.medicion_estandar,
+            m.valor_numerico,
+            m.valor_fuente,
+            m.unidad_estandar
+        FROM reporting.vw_mediciones m
+        WHERE {current_period_filter('m.fecha_medicion', tl)}
+          AND ({measure_filter})
+        ORDER BY m.fecha_medicion DESC NULLS LAST
+        """
+        return TranslationResult(sql=apply_limit(sql), strategy="rules_measurement")
+
     sql = f"""
     SELECT
         p.id_paciente,
+        p.id_paciente_fuente,
         p.genero_estandar,
-        p.edad_actual
+        p.edad_actual,
+        p.fecha_nacimiento_aprox
     FROM reporting.vw_pacientes p
     WHERE {age_clause}
     ORDER BY p.id_paciente DESC

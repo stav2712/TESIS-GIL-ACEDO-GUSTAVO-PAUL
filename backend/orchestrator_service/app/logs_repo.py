@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -19,6 +21,7 @@ class MongoRepo:
         db = self.client[settings.MONGO_DB]
         self.reports = db[settings.MONGO_COLLECTION]
         self.convs = db[settings.MONGO_CONVERSATIONS_COLLECTION]
+
         self.reports.create_index([("report_id", ASCENDING)], unique=True)
         self.reports.create_index([("user_id", ASCENDING), ("conversation_id", ASCENDING), ("timestamp", ASCENDING)])
         self.convs.create_index([("conversation_id", ASCENDING)], unique=True)
@@ -84,12 +87,7 @@ class MongoRepo:
         nl: str,
         sql: str,
         latency_ms: int,
-        *,
-        nl_normalized: str | None = None,
-        schema_profile: str | None = None,
-        resolved_terms: list[dict] | None = None,
-        resolved_values: list[dict] | None = None,
-        translator_strategy: str | None = None,
+        meta: dict | None = None,
     ) -> dict:
         rid = str(uuid4())
         ts = now_iso()
@@ -98,18 +96,13 @@ class MongoRepo:
             "conversation_id": conversation_id,
             "user_id": user_id,
             "nl": nl,
-            "nl_normalized": nl_normalized,
-            "schema_profile": schema_profile,
-            "resolved_terms": resolved_terms or [],
-            "resolved_values": resolved_values or [],
-            "translator_strategy": translator_strategy,
             "sql": sql,
             "timestamp": ts,
             "latency_ms": latency_ms,
             "feedback": None,
+            "meta": meta or {},
         }
         self.reports.insert_one(doc)
-
         preview = default_title(nl)
         self.convs.update_one(
             {"user_id": user_id, "conversation_id": conversation_id, "deleted": False},
@@ -124,17 +117,11 @@ class MongoRepo:
         return {k: doc[k] for k in doc if k != "_id"}
 
     def list_reports(self, user_id: int, conversation_id: str) -> list[dict]:
-        cur = self.reports.find(
-            {"user_id": user_id, "conversation_id": conversation_id},
-            {"_id": 0},
-        ).sort("timestamp", ASCENDING)
+        cur = self.reports.find({"user_id": user_id, "conversation_id": conversation_id}, {"_id": 0}).sort("timestamp", ASCENDING)
         return list(cur)
 
     def get_report(self, user_id: int, report_id: str) -> dict | None:
-        return self.reports.find_one(
-            {"user_id": user_id, "report_id": report_id},
-            {"_id": 0},
-        )
+        return self.reports.find_one({"user_id": user_id, "report_id": report_id}, {"_id": 0})
 
     def set_feedback(self, user_id: int, report_id: str, value: str) -> bool:
         if value not in ("up", "down"):

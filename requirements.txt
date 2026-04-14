@@ -19,3 +19,4 @@ honcho
 #sentencepiece
 #protobuf
 #accelerate
+#psycopg2-binary

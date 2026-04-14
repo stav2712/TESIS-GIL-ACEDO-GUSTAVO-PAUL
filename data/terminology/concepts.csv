@@ -1,8 +1,7 @@
-canonical,category,codes,aliases_es,aliases_en
-infarto agudo de miocardio,diagnostico,I21,infarto agudo de miocardio;ataque cardiaco;ataques cardiacos;iam,myocardial infarction;heart attack
-hipertensión arterial,diagnostico,I10,hipertension;presión alta;presion alta,hypertension;high blood pressure
-diabetes mellitus tipo 2,diagnostico,E11,diabetes;diabetes tipo 2,type 2 diabetes;diabetes mellitus
-asma,diagnostico,J45,asma,asthma
-glucosa,medicion,,glucosa;azúcar;azucar,glucose
-hemoglobina,medicion,,hemoglobina,hemoglobin
-presión arterial,medicion,,presión arterial;presion arterial,blood pressure
+term,canonical,category,codes,aliases
+diabetes,diabetes mellitus,diagnostico,E11,diabetes|diabetes mellitus
+hipertension,hypertension,diagnostico,I10,hipertensión|hypertension|presion alta
+infarto,infarto agudo de miocardio,diagnostico,I21,heart attack|myocardial infarction|iam|ataque cardiaco|ataques cardiacos
+asma,asthma,diagnostico,J45,asthma|asma
+glucosa,glucose,medicion,,azúcar|azucar|glucose
+hemoglobina,hemoglobin,medicion,,hemoglobin|hemoglobina
