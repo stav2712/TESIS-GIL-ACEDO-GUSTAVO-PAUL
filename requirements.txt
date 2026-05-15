@@ -10,8 +10,8 @@ openpyxl
 reportlab
 pymongo
 honcho
-# --- Nuevas dependencias para IA ---
-#Instalar torch con: pip install torch --index-url https://download.pytorch.org/whl/cu126
+# --- dependencias para IA :p ---
+#Instalar torch con: pip install torch==2.7.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 #torch
 
 #luego hacer pip install de:
