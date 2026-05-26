@@ -22,13 +22,17 @@ class Settings(BaseSettings):
     EXPORT_MAX_ROWS: int = 0
     EXPORT_PAGE_SIZE: int = 1000
 
-    # Límite pedido: máximo de filas navegables/mostrables en UI.
+    # Límite máximo de filas navegables/mostrables en UI.
     # Exportación NO usa este límite.
     QUERY_DISPLAY_MAX_ROWS: int = 5000
 
     CORS_ORIGINS: str = "http://localhost:5173"
     SCHEMA_PROFILE_PATH: str = "./data/schema/default_reporting_profile.json"
     QUERY_TIMEOUT_SECONDS: float = 300.0
+
+    # Archivo seguro para sobrescrituras operativas editadas desde el panel.
+    # No guarda secretos ni URLs internas; solo límites de uso.
+    SYSTEM_RUNTIME_CONFIG_PATH: str = "./data/system_runtime_config.json"
 
     # El orquestador también lee esto para mostrar configuración y validar perfiles.
     ALLOWED_TABLES: str = ""

@@ -2,6 +2,7 @@ import httpx
 from fastapi import HTTPException
 
 from .config import settings
+from .runtime_config import get_runtime_config
 
 
 async def execute_sql(
@@ -17,8 +18,10 @@ async def execute_sql(
         "max_result_window": max_result_window,
     }
 
+    timeout_seconds = get_runtime_config().query_timeout_seconds
+
     try:
-        async with httpx.AsyncClient(timeout=settings.QUERY_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             r = await client.post(settings.QUERY_URL, json=payload)
     except httpx.TimeoutException as e:
         raise HTTPException(
@@ -26,7 +29,7 @@ async def execute_sql(
             detail={
                 "error": "Timeout ejecutando SQL en query_service",
                 "detail": str(e),
-                "timeout_seconds": settings.QUERY_TIMEOUT_SECONDS,
+                "timeout_seconds": timeout_seconds,
                 "sql": sql,
             },
         )

@@ -114,6 +114,14 @@ export type DashboardSummary = {
   top_users: { user_id: number; username?: string | null; reports: number; last_at?: string | null }[];
 };
 
+type NumericLimit = {
+  min: number;
+  max: number;
+  min_when_enabled?: number;
+  unlimited_value?: number;
+  warning_below?: number;
+};
+
 export type SystemConfig = {
   query_display_max_rows: number;
   export_max_rows: number;
@@ -126,6 +134,33 @@ export type SystemConfig = {
   translator_url_configured: boolean;
   query_url: string;
   terminology_url: string;
+  limits?: {
+    query_display_max_rows: NumericLimit;
+    export_max_rows: NumericLimit;
+    query_timeout_seconds: NumericLimit;
+  };
+  warnings?: string[];
+};
+
+export type SystemConfigUpdatePayload = Partial<{
+  query_display_max_rows: number;
+  export_max_rows: number;
+  query_timeout_seconds: number;
+}>;
+
+export type SystemServiceStatus = {
+  key: "query" | "terminology" | "translator" | string;
+  label: string;
+  configured_url: string;
+  health_url: string;
+  ok: boolean;
+  status_code?: number | null;
+  detail: string;
+  checked_at: string;
+};
+
+export type SystemStatus = {
+  services: SystemServiceStatus[];
 };
 
 async function errorFromResponse(res: Response): Promise<string> {
@@ -249,10 +284,7 @@ export async function createProfile(payload: ProfilePayload & { name: string }):
   });
 }
 
-export async function updateProfile(
-  profileId: number,
-  payload: ProfilePayload
-): Promise<Profile> {
+export async function updateProfile(profileId: number, payload: ProfilePayload): Promise<Profile> {
   return request<Profile>(`/api/identity/profiles/${profileId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -387,4 +419,15 @@ export async function listAuditReports(params: {
 
 export async function getSystemConfig(): Promise<SystemConfig> {
   return request<SystemConfig>("/api/orchestrator/system/config");
+}
+
+export async function updateSystemConfig(payload: SystemConfigUpdatePayload): Promise<SystemConfig> {
+  return request<SystemConfig>("/api/orchestrator/system/config", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSystemStatus(): Promise<SystemStatus> {
+  return request<SystemStatus>("/api/orchestrator/system/status");
 }

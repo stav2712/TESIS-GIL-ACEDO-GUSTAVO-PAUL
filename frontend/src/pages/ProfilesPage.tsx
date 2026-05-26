@@ -134,7 +134,7 @@ export default function ProfilesPage() {
         <p className="text-sm uppercase tracking-[0.25em] text-[#0083B0] dark:text-lime-300 font-bold">Seguridad</p>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Perfiles y permisos</h2>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Controla qué puede hacer cada perfil, si puede ver el SQL generado y qué vistas clínicas puede consultar. El máximo visualizable es global para toda la plataforma.
+          Controla qué puede hacer cada perfil, si puede ver el SQL generado y qué vistas clínicas puede consultar.
         </p>
       </section>
 

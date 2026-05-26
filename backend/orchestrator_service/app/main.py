@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -16,6 +20,7 @@ from .models import (
     FeedbackIn,
     QueryIn,
     QueryOut,
+    SystemConfigUpdateIn,
 )
 from .orchestrator import run_query_flow
 from .policies import (
@@ -23,6 +28,13 @@ from .policies import (
     ensure_can_view_audit,
     ensure_can_view_config,
     visible_sql,
+)
+from .runtime_config import (
+    RuntimeConfig,
+    get_runtime_config,
+    runtime_config_limits,
+    runtime_config_warnings,
+    update_runtime_config,
 )
 from .security import require_claims
 from .sql_client import execute_sql
@@ -48,7 +60,7 @@ def health():
 
 def _display_window_for_user(max_display_rows: int | None = None) -> int:
     # Valor global de plataforma: no depende del perfil del usuario.
-    return max(int(settings.QUERY_DISPLAY_MAX_ROWS or 5000), 1)
+    return get_runtime_config().query_display_max_rows
 
 
 def _safe_filename(text: str) -> str:
@@ -67,6 +79,107 @@ def _public_report(doc: dict, can_view_sql: bool) -> dict:
         "resolved_values": meta.get("resolved_values", []),
         "translator_strategy": meta.get("translation_strategy"),
     }
+
+
+def _allowed_tables() -> list[str]:
+    return [x.strip() for x in settings.ALLOWED_TABLES.split(",") if x.strip()]
+
+
+def _export_meaning(export_max_rows: int) -> str:
+    if export_max_rows == 0:
+        return "Sin límite duro; la exportación pagina internamente y no usa el límite visual."
+    return f"La exportación se detiene al llegar a {export_max_rows} filas como máximo."
+
+
+def _system_config_response(runtime: RuntimeConfig | None = None) -> dict:
+    cfg = runtime or get_runtime_config()
+    return {
+        "query_display_max_rows": cfg.query_display_max_rows,
+        "export_max_rows": cfg.export_max_rows,
+        "export_max_rows_meaning": _export_meaning(cfg.export_max_rows),
+        "export_page_size": settings.EXPORT_PAGE_SIZE,
+        "query_timeout_seconds": cfg.query_timeout_seconds,
+        "translator_timeout_seconds": settings.TRANSLATOR_TIMEOUT_SECONDS,
+        "schema_profile_path": settings.SCHEMA_PROFILE_PATH,
+        "allowed_tables": _allowed_tables(),
+        "translator_url_configured": bool(settings.TRANSLATOR_URL),
+        "query_url": settings.QUERY_URL,
+        "terminology_url": settings.TERMINOLOGY_URL,
+        "limits": runtime_config_limits(),
+        "warnings": runtime_config_warnings(cfg),
+    }
+
+
+def _ensure_can_manage_system_config(claims) -> None:
+    ensure_can_view_config(claims)
+
+    # No agregamos una migración de permisos para no romper perfiles existentes.
+    # Solo perfiles con administración de perfiles (admin por defecto) pueden guardar cambios.
+    if claims.profile != "admin" and not claims.can("can_manage_profiles"):
+        raise HTTPException(403, "Solo un administrador puede modificar la configuración operativa")
+
+
+def _base_from_endpoint_url(url: str, endpoint: str) -> str:
+    parsed = urlsplit(url)
+    path = parsed.path.rstrip("/")
+    endpoint = endpoint.rstrip("/")
+
+    if path.lower().endswith(endpoint.lower()):
+        path = path[: -len(endpoint)].rstrip("/")
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _join_url(base: str, path: str) -> str:
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+
+async def _check_service(
+    client: httpx.AsyncClient,
+    *,
+    key: str,
+    label: str,
+    configured_url: str,
+    health_url: str,
+) -> dict:
+    checked_at = datetime.now(timezone.utc).isoformat()
+
+    try:
+        response = await client.get(health_url)
+        ok = 200 <= response.status_code < 300
+        detail = "OK" if ok else f"HTTP {response.status_code}"
+        return {
+            "key": key,
+            "label": label,
+            "configured_url": configured_url,
+            "health_url": health_url,
+            "ok": ok,
+            "status_code": response.status_code,
+            "detail": detail,
+            "checked_at": checked_at,
+        }
+    except httpx.TimeoutException:
+        return {
+            "key": key,
+            "label": label,
+            "configured_url": configured_url,
+            "health_url": health_url,
+            "ok": False,
+            "status_code": None,
+            "detail": "Sin respuesta dentro del tiempo de diagnóstico",
+            "checked_at": checked_at,
+        }
+    except httpx.RequestError as exc:
+        return {
+            "key": key,
+            "label": label,
+            "configured_url": configured_url,
+            "health_url": health_url,
+            "ok": False,
+            "status_code": None,
+            "detail": str(exc),
+            "checked_at": checked_at,
+        }
 
 
 # ---------- Queries ----------
@@ -200,7 +313,7 @@ async def export(
     columns: list[str] = []
     p = 1
     size = max(min(settings.EXPORT_PAGE_SIZE, 1000), 1)
-    export_limit = max(settings.EXPORT_MAX_ROWS, 0)
+    export_limit = max(get_runtime_config().export_max_rows, 0)
 
     while True:
         data = await execute_sql(doc["sql"], page=p, page_size=size, max_result_window=None)
@@ -313,18 +426,50 @@ def audit_reports(
 def system_config(authorization: str | None = Header(default=None)):
     claims = require_claims(authorization)
     ensure_can_view_config(claims)
+    return _system_config_response()
 
-    allowed = [x.strip() for x in settings.ALLOWED_TABLES.split(",") if x.strip()]
-    return {
-        "query_display_max_rows": settings.QUERY_DISPLAY_MAX_ROWS,
-        "export_max_rows": settings.EXPORT_MAX_ROWS,
-        "export_max_rows_meaning": "0 = sin límite duro; la exportación no usa el límite visual de 5000.",
-        "export_page_size": settings.EXPORT_PAGE_SIZE,
-        "query_timeout_seconds": settings.QUERY_TIMEOUT_SECONDS,
-        "translator_timeout_seconds": settings.TRANSLATOR_TIMEOUT_SECONDS,
-        "schema_profile_path": settings.SCHEMA_PROFILE_PATH,
-        "allowed_tables": allowed,
-        "translator_url_configured": bool(settings.TRANSLATOR_URL),
-        "query_url": settings.QUERY_URL,
-        "terminology_url": settings.TERMINOLOGY_URL,
-    }
+
+@app.patch("/system/config")
+def update_system_config(payload: SystemConfigUpdateIn, authorization: str | None = Header(default=None)):
+    claims = require_claims(authorization)
+    _ensure_can_manage_system_config(claims)
+
+    cfg = update_runtime_config(payload.model_dump(exclude_unset=True))
+    return _system_config_response(cfg)
+
+
+@app.get("/system/status")
+async def system_status(authorization: str | None = Header(default=None)):
+    claims = require_claims(authorization)
+    ensure_can_view_config(claims)
+
+    query_base = _base_from_endpoint_url(settings.QUERY_URL, "/execute")
+    terminology_base = settings.TERMINOLOGY_URL.rstrip("/")
+    translator_base = _base_from_endpoint_url(settings.TRANSLATOR_URL, "/translate")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        services = [
+            await _check_service(
+                client,
+                key="query",
+                label="Query service",
+                configured_url=settings.QUERY_URL,
+                health_url=_join_url(query_base, "/health"),
+            ),
+            await _check_service(
+                client,
+                key="terminology",
+                label="Terminology service",
+                configured_url=settings.TERMINOLOGY_URL,
+                health_url=_join_url(terminology_base, "/health"),
+            ),
+            await _check_service(
+                client,
+                key="translator",
+                label="Translator service",
+                configured_url=settings.TRANSLATOR_URL,
+                health_url=_join_url(translator_base, "/healthz"),
+            ),
+        ]
+
+    return {"services": services}

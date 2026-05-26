@@ -118,3 +118,11 @@ class AuditListOut(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class SystemConfigUpdateIn(BaseModel):
+    # Todos son opcionales para permitir guardar cambios parciales.
+    # La validación fina vive en runtime_config.py para mantener una sola fuente de reglas.
+    query_display_max_rows: int | None = None
+    export_max_rows: int | None = None
+    query_timeout_seconds: float | None = None

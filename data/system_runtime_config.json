@@ -1,0 +1,5 @@
+{
+  "query_display_max_rows": 5000,
+  "export_max_rows": 0,
+  "query_timeout_seconds": 300.0
+}

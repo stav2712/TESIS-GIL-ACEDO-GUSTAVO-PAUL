@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from .config import settings
 from .logs_repo import MongoRepo, default_title
 from .policies import ensure_can_run_query, ensure_sql_allowed_by_profile, visible_sql
+from .runtime_config import get_runtime_config
 from .schema_loader import load_schema_profile
 from .security import UserClaims
 from .sql_client import execute_sql
@@ -17,7 +18,7 @@ repo = MongoRepo()
 
 def _display_window_for_user(claims: UserClaims) -> int:
     # Valor global de plataforma: no depende del perfil del usuario.
-    return max(int(settings.QUERY_DISPLAY_MAX_ROWS or 5000), 1)
+    return get_runtime_config().query_display_max_rows
 
 
 def _page_size_for_user(page_size: int, claims: UserClaims) -> int:
