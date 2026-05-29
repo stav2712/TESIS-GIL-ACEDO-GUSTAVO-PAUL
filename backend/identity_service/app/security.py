@@ -11,6 +11,7 @@ from .config import settings
 from .models import DEFAULT_PERMISSIONS, User, UserProfile
 
 pwd = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+ACL_VERSION = 6
 
 
 def hash_password(p: str) -> str:
@@ -28,6 +29,8 @@ def profile_payload(profile: UserProfile | None) -> dict[str, Any]:
             "profile_id": None,
             "permissions": DEFAULT_PERMISSIONS.copy(),
             "allowed_tables": [],
+            "table_access_mode": "all",
+            "column_permissions": {},
             "max_page_size": 50,
         }
 
@@ -36,6 +39,8 @@ def profile_payload(profile: UserProfile | None) -> dict[str, Any]:
         "profile_id": profile.id,
         "permissions": profile.permissions,
         "allowed_tables": profile.allowed_tables_list,
+        "table_access_mode": profile.table_mode,
+        "column_permissions": profile.column_permissions,
         "max_page_size": min(profile.max_page_size or 50, 50),
     }
 
@@ -46,12 +51,14 @@ def create_jwt(user: User) -> str:
 
     # El token ya no incluye `role`. El perfil es la única fuente de permisos.
     # El máximo visualizable ya no viaja por perfil: es una política global del orquestador.
+    # acl_version=6 fuerza re-login para que viajen correo, modo de vistas y reglas por columnas.
     payload = {
         "sub": str(user.id),
         "username": user.username,
         "full_name": user.full_name,
+        "email": user.email,
         "is_active": user.is_active,
-        "acl_version": 3,
+        "acl_version": ACL_VERSION,
         "exp": exp,
         **profile_data,
     }
@@ -70,6 +77,9 @@ def decode_jwt(auth_header: str | None) -> dict[str, Any]:
 
     if payload.get("is_active") is False:
         raise HTTPException(403, "Usuario inactivo")
+
+    if int(payload.get("acl_version") or 0) < ACL_VERSION:
+        raise HTTPException(401, "Token desactualizado. Vuelve a iniciar sesión")
 
     return payload
 

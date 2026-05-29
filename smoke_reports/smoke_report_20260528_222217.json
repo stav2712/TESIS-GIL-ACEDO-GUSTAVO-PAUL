@@ -1,0 +1,418 @@
+{
+  "summary": {
+    "PASS": 51,
+    "FAIL": 0,
+    "WARN": 0,
+    "SKIP": 0
+  },
+  "results": [
+    {
+      "name": "Identity /health",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 42,
+      "url": "http://127.0.0.1:8002/health"
+    },
+    {
+      "name": "Orchestrator /health",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 5,
+      "url": "http://127.0.0.1:8000/health"
+    },
+    {
+      "name": "Query service /health",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 6,
+      "url": "http://127.0.0.1:8003/health"
+    },
+    {
+      "name": "Terminology /health",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 18,
+      "url": "http://127.0.0.1:8004/health"
+    },
+    {
+      "name": "Login inválido debe rechazar credenciales",
+      "status": "PASS",
+      "http_status": 401,
+      "detail": "HTTP 401.",
+      "elapsed_ms": 15,
+      "url": "http://127.0.0.1:8002/auth"
+    },
+    {
+      "name": "Login admin/usuario de prueba",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 42,
+      "url": "http://127.0.0.1:8002/auth"
+    },
+    {
+      "name": "/me con Bearer token",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 3,
+      "url": "http://127.0.0.1:8002/me"
+    },
+    {
+      "name": "GET /users búsqueda con carácter regex '[' no debe caer",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 4,
+      "url": "http://127.0.0.1:8002/users?q=%5B"
+    },
+    {
+      "name": "GET /profiles",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 25,
+      "url": "http://127.0.0.1:8002/profiles"
+    },
+    {
+      "name": "GET /users",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 4,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Usuario corto debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 27,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Usuario con símbolo inválido debe fallar",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 3,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Contraseña corta debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 2,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Correo inválido debe fallar",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 26,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "profile_id no numérico debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 3,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "full_name excedido debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 3,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Perfil max_page_size > 50 debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 21,
+      "url": "http://127.0.0.1:8002/profiles"
+    },
+    {
+      "name": "Perfil con tabla inválida debe fallar controlado",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 3,
+      "url": "http://127.0.0.1:8002/profiles"
+    },
+    {
+      "name": "Crear usuario temporal",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 563,
+      "url": "http://127.0.0.1:8002/users"
+    },
+    {
+      "name": "Editar usuario temporal y verificar actualización",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 18,
+      "url": "http://127.0.0.1:8002/users/7"
+    },
+    {
+      "name": "Verificar datos editados",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "El PATCH persistió los campos.",
+      "elapsed_ms": 18,
+      "url": "http://127.0.0.1:8002/users/7"
+    },
+    {
+      "name": "Login usuario temporal antes de baja",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 35,
+      "url": "http://127.0.0.1:8002/auth"
+    },
+    {
+      "name": "Dar de baja lógica usuario temporal",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 34,
+      "url": "http://127.0.0.1:8002/users/7"
+    },
+    {
+      "name": "Login usuario dado de baja debe fallar",
+      "status": "PASS",
+      "http_status": 401,
+      "detail": "HTTP 401.",
+      "elapsed_ms": 16,
+      "url": "http://127.0.0.1:8002/auth"
+    },
+    {
+      "name": "Orchestrator rechaza sin token",
+      "status": "PASS",
+      "http_status": 401,
+      "detail": "HTTP 401.",
+      "elapsed_ms": 14,
+      "url": "http://127.0.0.1:8000/conversations"
+    },
+    {
+      "name": "GET /conversations",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 21,
+      "url": "http://127.0.0.1:8000/conversations"
+    },
+    {
+      "name": "Crear conversación temporal",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 2,
+      "url": "http://127.0.0.1:8000/conversations"
+    },
+    {
+      "name": "Obtener conversación temporal",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 2,
+      "url": "http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38"
+    },
+    {
+      "name": "Renombrar conversación temporal",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/rename"
+    },
+    {
+      "name": "Renombrar conversación con título excedido debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 0,
+      "url": "http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/rename"
+    },
+    {
+      "name": "Eliminar conversación temporal baja lógica",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 23,
+      "url": "http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/delete"
+    },
+    {
+      "name": "Conversación eliminada no debe recuperarse",
+      "status": "PASS",
+      "http_status": 404,
+      "detail": "HTTP 404.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38"
+    },
+    {
+      "name": "GET /admin/dashboard",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 5,
+      "url": "http://127.0.0.1:8000/admin/dashboard"
+    },
+    {
+      "name": "GET /admin/audit/reports q='[' no debe romper regex",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 26,
+      "url": "http://127.0.0.1:8000/admin/audit/reports?page=1&page_size=5&q=%5B"
+    },
+    {
+      "name": "GET /system/config",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8000/system/config"
+    },
+    {
+      "name": "GET /system/schema",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200. 502 indica que Query Service/BD no respondió, no necesariamente validación rota.",
+      "elapsed_ms": 343,
+      "url": "http://127.0.0.1:8000/system/schema"
+    },
+    {
+      "name": "GET /system/status",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 15701,
+      "url": "http://127.0.0.1:8000/system/status"
+    },
+    {
+      "name": "PATCH /system/config inválido debe fallar validado",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 2,
+      "url": "http://127.0.0.1:8000/system/config"
+    },
+    {
+      "name": "POST /query con pregunta vacía debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 20,
+      "url": "http://127.0.0.1:8000/query"
+    },
+    {
+      "name": "POST /query con page_size > 200 debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8000/query"
+    },
+    {
+      "name": "POST /query-jobs con conversation_id inválido debe fallar",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 15,
+      "url": "http://127.0.0.1:8000/query-jobs"
+    },
+    {
+      "name": "Query /execute SELECT 1",
+      "status": "PASS",
+      "http_status": 200,
+      "detail": "HTTP 200.",
+      "elapsed_ms": 16,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea DELETE",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea múltiples sentencias",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea pg_sleep",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 1,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea COPY",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 23,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea SELECT INTO",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 16,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea FOR UPDATE",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 2,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Bloquea tabla fuera de reporting permitido",
+      "status": "PASS",
+      "http_status": 400,
+      "detail": "HTTP 400.",
+      "elapsed_ms": 13,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Query /execute page_size texto debe fallar validado",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 14,
+      "url": "http://127.0.0.1:8003/execute"
+    },
+    {
+      "name": "Query /execute page fuera de rango debe fallar validado",
+      "status": "PASS",
+      "http_status": 422,
+      "detail": "HTTP 422.",
+      "elapsed_ms": 15,
+      "url": "http://127.0.0.1:8003/execute"
+    }
+  ]
+}

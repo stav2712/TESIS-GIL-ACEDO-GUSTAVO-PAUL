@@ -1,16 +1,72 @@
-from math import ceil
+from __future__ import annotations
 
-from fastapi import FastAPI, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import text
+import logging
+from math import ceil
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import get_db
+from .db import engine, get_db
 from .guardrails import extract_tables, is_safe_select
 
 app = FastAPI(title="Query Service")
+logger = logging.getLogger("query_service")
+
+
+def _validation_field_label(loc: tuple | list) -> str:
+    name = str(loc[-1] if loc else "campo")
+    return {
+        "sql": "consulta SQL",
+        "page": "página",
+        "page_size": "tamaño de página",
+        "max_result_window": "límite de visualización",
+    }.get(name, name)
+
+
+def _friendly_validation_message(errors: list[dict[str, Any]]) -> str:
+    if not errors:
+        return "Revisa los datos enviados. Hay campos obligatorios o con formato inválido."
+    first = errors[0]
+    field = _validation_field_label(first.get("loc") or [])
+    kind = str(first.get("type") or "")
+    if kind == "missing":
+        return f"El campo {field} es obligatorio."
+    if "string_too_short" in kind:
+        return f"El campo {field} no puede estar vacío."
+    if "string_too_long" in kind:
+        return f"El campo {field} supera el tamaño máximo permitido."
+    if "int" in kind or "float" in kind or "greater_than_equal" in kind or "less_than_equal" in kind:
+        return f"El campo {field} debe tener un valor numérico válido dentro del rango permitido."
+    return "Revisa los datos enviados. Hay campos obligatorios o con formato inválido."
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning("Validation error in %s %s: %s", request.method, request.url.path, exc.errors())
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _friendly_validation_message(exc.errors()), "error_code": "VALIDATION_ERROR"},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error in %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "No se pudo ejecutar la consulta. Inténtalo nuevamente o contacta al administrador.",
+            "error_code": "INTERNAL_ERROR",
+        },
+    )
+
 
 ALLOWED = {
     t.strip().lower()
@@ -20,12 +76,12 @@ ALLOWED = {
 
 
 class ExecuteIn(BaseModel):
-    sql: str
-    page: int = 1
-    page_size: int = 50
+    sql: str = Field(min_length=1, max_length=50_000)
+    page: int = Field(default=1, ge=1, le=100_000)
+    page_size: int = Field(default=50, ge=1, le=1000)
     # Máximo de filas navegables/visibles para UI.
     # None o <=0 = sin límite visual; se usa para exportar todos los datos.
-    max_result_window: int | None = None
+    max_result_window: int | None = Field(default=None, ge=0, le=250_000)
 
 
 @app.get("/health")
@@ -43,12 +99,55 @@ def _message(total_count: int, max_window: int | None) -> str | None:
     return None
 
 
+def _split_table_name(table: str) -> tuple[str | None, str]:
+    cleaned = table.strip().strip('"')
+    if "." not in cleaned:
+        return None, cleaned
+
+    schema, name = cleaned.split(".", 1)
+    return schema.strip().strip('"') or None, name.strip().strip('"')
+
+
+def _apply_statement_timeout(db: Session) -> None:
+    """Evita que una consulta permitida quede colgada indefinidamente en PostgreSQL."""
+    if settings.DB_DIALECT.lower() != "postgresql":
+        return
+
+    timeout_seconds = max(float(getattr(settings, "QUERY_TIMEOUT_SECONDS", 300.0) or 300.0), 1.0)
+    timeout_ms = int(timeout_seconds * 1000)
+    # SET LOCAL solo dura la transacción actual y no cambia configuración global.
+    db.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
+
+
+@app.get("/schema/columns")
+def schema_columns():
+    """
+    Endpoint interno para que el orquestador muestre columnas configurables por vista.
+    Solo expone tablas/vistas incluidas en ALLOWED_TABLES.
+    """
+    inspector = inspect(engine)
+    tables: dict[str, list[str]] = {}
+    errors: dict[str, str] = {}
+
+    for table in sorted(ALLOWED):
+        schema, name = _split_table_name(table)
+        try:
+            cols = inspector.get_columns(name, schema=schema)
+            tables[table] = [str(col["name"]) for col in cols]
+        except Exception as exc:
+            # No rompemos toda la respuesta si una vista no existe o no es introspectable.
+            tables[table] = []
+            errors[table] = str(exc)
+
+    return {"tables": tables, "errors": errors}
+
+
 @app.post("/execute")
 def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
     sql = payload.sql.strip().rstrip(";")
 
     if not is_safe_select(sql):
-        raise HTTPException(400, "Solo SELECT permitido")
+        raise HTTPException(400, "Solo SELECT seguro permitido")
 
     used = extract_tables(sql)
 
@@ -77,6 +176,8 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
     count_sql = f"SELECT COUNT(*) AS total_count FROM ({sql_for_count}) AS __nl2sql_count"
 
     try:
+        _apply_statement_timeout(db)
+
         count_res = db.execute(text(count_sql))
         total_count = int(count_res.scalar() or 0)
 
@@ -139,26 +240,27 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
 
         original = getattr(e, "orig", None)
         detail = str(original) if original else str(e)
+        logger.warning(
+            "SQL execution failed. detail=%s sql_original=%s sql_paged=%s",
+            detail,
+            sql_for_count,
+            locals().get("sql_paged"),
+        )
 
         raise HTTPException(
             422,
-            {
-                "error": "SQL falló al ejecutarse en la base de datos",
-                "detail": detail,
-                "sql_original": sql_for_count,
-                "sql_paginado": locals().get("sql_paged"),
-            },
+            "La consulta generada no pudo ejecutarse correctamente. Reformula la pregunta o contacta al administrador.",
         )
 
     except Exception as e:
         db.rollback()
+        logger.exception(
+            "Unexpected SQL execution error. sql_original=%s sql_paged=%s",
+            sql_for_count,
+            locals().get("sql_paged"),
+        )
 
         raise HTTPException(
             500,
-            {
-                "error": "Error interno ejecutando SQL",
-                "detail": str(e),
-                "sql_original": sql_for_count,
-                "sql_paginado": locals().get("sql_paged"),
-            },
+            "No se pudo ejecutar la consulta por un error interno. Inténtalo nuevamente o contacta al administrador.",
         )

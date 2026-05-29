@@ -4,7 +4,31 @@ import re
 
 
 DISALLOWED = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|CALL|EXEC|EXECUTE|MERGE|COPY)\b",
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|CALL|EXEC|EXECUTE|MERGE|COPY|VACUUM|ANALYZE|LOCK|NOTIFY|LISTEN)\b",
+    re.IGNORECASE,
+)
+
+# Funciones que pueden bloquear el servicio, leer archivos del servidor,
+# abrir conexiones externas, modificar estado de sesión o revelar metadata sensible.
+DANGEROUS_FUNCTIONS = re.compile(
+    r"(?<![A-Za-z0-9_])(?:(?:pg_catalog|public)\s*\.\s*)?"
+    r"(pg_sleep|dblink|dblink_connect|lo_import|lo_export|pg_read_file|"
+    r"pg_read_binary_file|pg_ls_dir|pg_stat_file|pg_advisory_lock|"
+    r"pg_advisory_xact_lock|pg_terminate_backend|pg_cancel_backend|"
+    r"set_config|current_setting|version|inet_server_addr|inet_server_port|"
+    r"pg_backend_pid|pg_postmaster_start_time)\s*\(",
+    re.IGNORECASE,
+)
+
+# En PostgreSQL, SELECT ... INTO crea una tabla. No es una consulta read-only.
+SELECT_INTO = re.compile(
+    r"\bselect\b(?:(?!\bfrom\b).)*\binto\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# SELECT ... FOR UPDATE/SHARE toma locks. No debe permitirse en reportes.
+LOCKING_CLAUSE = re.compile(
+    r"\bfor\s+(update|no\s+key\s+update|share|key\s+share)\b",
     re.IGNORECASE,
 )
 
@@ -16,8 +40,9 @@ DOLLAR_QUOTED_RE = re.compile(
     re.DOTALL,
 )
 
+IDENT = r'"?[A-Za-z_][A-Za-z0-9_]*"?'
 TABLE_RE = re.compile(
-    r'\b(?:from|join)\s+((?:"?[A-Za-z_][A-Za-z0-9_]*"?\.)?"?[A-Za-z_][A-Za-z0-9_]*"?)',
+    rf"\b(?:from|join)\s+(({IDENT}\s*\.\s*)?{IDENT})",
     flags=re.IGNORECASE,
 )
 
@@ -31,7 +56,7 @@ def _analysis_sql(sql: str) -> str:
 
 
 def _clean_identifier(identifier: str) -> str:
-    parts = [p.strip().strip('"').lower() for p in identifier.split(".")]
+    parts = [p.strip().strip('"').lower() for p in re.split(r"\s*\.\s*", identifier)]
     return ".".join(p for p in parts if p)
 
 
@@ -43,7 +68,6 @@ def _skip_ws(s: str, i: int) -> int:
 
 def _read_identifier(s: str, i: int) -> tuple[str | None, int]:
     i = _skip_ws(s, i)
-
     if i >= len(s):
         return None, i
 
@@ -51,112 +75,79 @@ def _read_identifier(s: str, i: int) -> tuple[str | None, int]:
         j = i + 1
         while j < len(s):
             if s[j] == '"':
-                return s[i:j + 1], j + 1
+                return s[i : j + 1], j + 1
             j += 1
         return None, i
 
     m = re.match(r"[A-Za-z_][A-Za-z0-9_]*", s[i:])
     if not m:
         return None, i
-
     return m.group(0), i + len(m.group(0))
 
 
 def _skip_parentheses(s: str, i: int) -> int:
     i = _skip_ws(s, i)
-
     if i >= len(s) or s[i] != "(":
         return i
 
     depth = 0
-
     while i < len(s):
         ch = s[i]
-
         if ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
             if depth == 0:
                 return i + 1
-
         i += 1
-
     return i
 
 
 def extract_cte_names(sql: str) -> set[str]:
     """
-    Extrae nombres de CTEs declarados al inicio:
-
-    WITH base AS (...),
-         dx AS (...),
-         pr AS (...),
-         med AS (...)
-    SELECT ...
-
-    Soporta tambi?n:
-    WITH RECURSIVE ...
-    WITH base AS MATERIALIZED (...)
-    WITH base AS NOT MATERIALIZED (...)
-    WITH base(col1, col2) AS (...)
+    Extrae nombres de CTEs declarados al inicio.
+    Soporta WITH RECURSIVE, MATERIALIZED, NOT MATERIALIZED y columnas explícitas.
     """
     s = _analysis_sql(sql).strip()
     lower = s.lower()
-
     if not lower.startswith("with"):
         return set()
 
-    i = 4
-    i = _skip_ws(s, i)
-
-    if s[i:i + 9].lower() == "recursive":
-        i += 9
+    i = _skip_ws(s, 4)
+    if s[i : i + 9].lower() == "recursive":
+        i = _skip_ws(s, i + 9)
 
     ctes: set[str] = set()
-
     while i < len(s):
         name, i2 = _read_identifier(s, i)
-
         if not name:
             break
 
         ctes.add(_clean_identifier(name))
         i = _skip_ws(s, i2)
 
-        # Opcional: WITH cte(col1, col2) AS (...)
+        # WITH cte(col1, col2) AS (...)
         if i < len(s) and s[i] == "(":
-            i = _skip_parentheses(s, i)
-            i = _skip_ws(s, i)
+            i = _skip_ws(s, _skip_parentheses(s, i))
 
-        # Debe venir AS
-        if s[i:i + 2].lower() != "as":
+        if s[i : i + 2].lower() != "as":
             break
 
-        i += 2
-        i = _skip_ws(s, i)
+        i = _skip_ws(s, i + 2)
 
-        # Opcional en PostgreSQL: AS MATERIALIZED / AS NOT MATERIALIZED
-        if s[i:i + 3].lower() == "not":
-            i += 3
-            i = _skip_ws(s, i)
+        # AS NOT MATERIALIZED (...)
+        if s[i : i + 3].lower() == "not":
+            i = _skip_ws(s, i + 3)
+        if s[i : i + 12].lower() == "materialized":
+            i = _skip_ws(s, i + 12)
 
-        if s[i:i + 12].lower() == "materialized":
-            i += 12
-            i = _skip_ws(s, i)
-
-        # Cuerpo del CTE
         if i >= len(s) or s[i] != "(":
             break
 
-        i = _skip_parentheses(s, i)
-        i = _skip_ws(s, i)
-
-        # Otro CTE separado por coma
+        i = _skip_ws(s, _skip_parentheses(s, i))
         if i < len(s) and s[i] == ",":
-            i += 1
+            i = _skip_ws(s, i + 1)
             continue
-
         break
 
     return ctes
@@ -164,25 +155,31 @@ def extract_cte_names(sql: str) -> set[str]:
 
 def is_safe_select(sql: str) -> bool:
     s = sql.strip()
-
     if not s:
         return False
 
     analysis = _analysis_sql(s).strip()
 
-    # Permite un ?nico ; final, pero bloquea m?ltiples sentencias.
+    # Permite un único ; final, pero bloquea múltiples sentencias.
     if ";" in analysis.rstrip(";"):
         return False
 
     analysis = analysis.rstrip(";").strip()
+    lower = analysis.lower()
 
-    if not (
-        analysis.lower().startswith("select")
-        or analysis.lower().startswith("with")
-    ):
+    if not (lower.startswith("select") or lower.startswith("with")):
         return False
 
     if DISALLOWED.search(f" {analysis} "):
+        return False
+
+    if SELECT_INTO.search(analysis):
+        return False
+
+    if LOCKING_CLAUSE.search(analysis):
+        return False
+
+    if DANGEROUS_FUNCTIONS.search(analysis):
         return False
 
     return True
@@ -191,26 +188,14 @@ def is_safe_select(sql: str) -> bool:
 def extract_tables(sql: str) -> set[str]:
     """
     Extrae tablas/vistas reales usadas en FROM/JOIN.
-
-    Ignora referencias a CTEs como:
-    FROM base
-    JOIN dx
-    JOIN pr
-    JOIN med
-
-    Pero sigue capturando las vistas reales dentro de los CTEs:
-    reporting.vw_pacientes
-    reporting.vw_diagnosticos
-    etc.
+    Ignora CTEs sin esquema, pero mantiene las vistas reales dentro de ellos.
     """
     s = _analysis_sql(sql)
     cte_names = extract_cte_names(s)
-
     tables: set[str] = set()
 
     for match in TABLE_RE.finditer(s):
         table_name = _clean_identifier(match.group(1))
-
         if not table_name:
             continue
 

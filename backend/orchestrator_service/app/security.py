@@ -8,16 +8,52 @@ from jose import JWTError, jwt
 
 from .config import settings
 
+ACL_VERSION = 6
+
+
+def _normalize_column_permissions(value: Any) -> dict[str, dict[str, list[str]]]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, dict[str, list[str]]] = {}
+    for raw_table, raw_rules in value.items():
+        table = str(raw_table or "").strip().lower()
+        if not table or not isinstance(raw_rules, dict):
+            continue
+
+        hidden = {
+            str(col).strip().lower()
+            for col in (raw_rules.get("hidden") or [])
+            if str(col).strip()
+        }
+        forbidden = {
+            str(col).strip().lower()
+            for col in (raw_rules.get("forbidden") or [])
+            if str(col).strip()
+        }
+        hidden -= forbidden
+
+        if hidden or forbidden:
+            normalized[table] = {
+                "hidden": sorted(hidden),
+                "forbidden": sorted(forbidden),
+            }
+
+    return normalized
+
 
 @dataclass(frozen=True)
 class UserClaims:
     user_id: int
     username: str | None
     full_name: str | None
+    email: str | None
     profile: str | None
     profile_id: int | None
     permissions: dict[str, bool]
     allowed_tables: list[str]
+    table_access_mode: str
+    column_permissions: dict[str, dict[str, list[str]]]
     max_display_rows: int
     max_page_size: int
 
@@ -47,20 +83,28 @@ def require_claims(auth_header: str | None) -> UserClaims:
     except Exception:
         raise HTTPException(401, "Token inválido: falta sub")
 
-    if int(payload.get("acl_version") or 0) < 3:
+    if int(payload.get("acl_version") or 0) < ACL_VERSION:
         raise HTTPException(401, "Token desactualizado. Vuelve a iniciar sesión")
 
     permissions = payload.get("permissions") or {}
     allowed_tables = payload.get("allowed_tables") or []
+    table_access_mode = str(payload.get("table_access_mode") or "all").strip().lower()
+    if table_access_mode not in {"all", "custom"}:
+        table_access_mode = "all"
+
+    email = str(payload.get("email") or "").strip().lower() or None
 
     return UserClaims(
         user_id=user_id,
         username=payload.get("username"),
         full_name=payload.get("full_name"),
+        email=email,
         profile=payload.get("profile"),
         profile_id=payload.get("profile_id"),
         permissions={str(k): bool(v) for k, v in permissions.items()},
         allowed_tables=[str(x).strip().lower() for x in allowed_tables if str(x).strip()],
+        table_access_mode=table_access_mode,
+        column_permissions=_normalize_column_permissions(payload.get("column_permissions") or {}),
         # Política global: el máximo visualizable no se lee del perfil ni del token.
         max_display_rows=settings.QUERY_DISPLAY_MAX_ROWS,
         max_page_size=min(int(payload.get("max_page_size") or 50), 50),

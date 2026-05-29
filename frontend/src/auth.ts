@@ -1,14 +1,23 @@
-const TOKEN_KEY = "empresa_reports_token_v3";
-const LEGACY_TOKEN_KEYS = ["empresa_reports_token", "empresa_reports_token_v2"];
+const TOKEN_KEY = "empresa_reports_token_v6";
+const LEGACY_TOKEN_KEYS = ["empresa_reports_token", "empresa_reports_token_v2", "empresa_reports_token_v3", "empresa_reports_token_v4", "empresa_reports_token_v5"];
+const ACL_VERSION = 6;
+
+export type ColumnPermissionRule = {
+  hidden?: string[];
+  forbidden?: string[];
+};
 
 export type AuthUser = {
   user_id: number;
   username: string;
   full_name?: string | null;
+  email?: string | null;
   profile?: string | null;
   profile_id?: number | null;
   permissions: Record<string, boolean>;
   allowed_tables: string[];
+  table_access_mode: "all" | "custom";
+  column_permissions: Record<string, ColumnPermissionRule>;
   max_display_rows: number;
   max_page_size: number;
 };
@@ -17,10 +26,13 @@ type JwtPayload = {
   sub?: string;
   username?: string;
   full_name?: string | null;
+  email?: string | null;
   profile?: string | null;
   profile_id?: number | null;
   permissions?: Record<string, boolean>;
   allowed_tables?: string[];
+  table_access_mode?: "all" | "custom";
+  column_permissions?: Record<string, ColumnPermissionRule>;
   max_display_rows?: number;
   max_page_size?: number;
   acl_version?: number;
@@ -75,13 +87,13 @@ export function getAuthUser(): AuthUser | null {
   const payload = decodePayload(token);
 
   // Fuerza login si queda un JWT viejo del sistema anterior o un token corrupto.
-  // Desde v3 el perfil es la única fuente de autorización.
+  // Desde v6 el token también transporta correo, modo de acceso a vistas y reglas por columnas.
   if (
     !payload ||
     !payload.sub ||
     !payload.username ||
     !payload.permissions ||
-    Number(payload.acl_version ?? 0) < 3 ||
+    Number(payload.acl_version ?? 0) < ACL_VERSION ||
     isExpired(payload)
   ) {
     clearToken();
@@ -92,10 +104,13 @@ export function getAuthUser(): AuthUser | null {
     user_id: Number(payload.sub),
     username: payload.username,
     full_name: payload.full_name ?? null,
+    email: payload.email ?? null,
     profile: payload.profile ?? null,
     profile_id: payload.profile_id ?? null,
     permissions: payload.permissions ?? {},
     allowed_tables: payload.allowed_tables ?? [],
+    table_access_mode: payload.table_access_mode === "custom" ? "custom" : "all",
+    column_permissions: payload.column_permissions ?? {},
     max_display_rows: Number(payload.max_display_rows ?? 5000),
     max_page_size: Number(payload.max_page_size ?? 50),
   };

@@ -1,60 +1,123 @@
-import { useEffect, useMemo, useState } from "react";
-import { clearToken } from "../auth";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { clearToken, getAuthUser } from "../auth";
 import {
   type Conversation,
-  type ReportMeta,
   type ReportData,
+  type QueryJob,
+  type QueryResponse,
+  type ReportMeta,
   deleteConversation,
   downloadExport,
   getConversation,
+  getQueryJob,
   getReportData,
+  listActiveQueryJobs,
   listConversations,
   renameConversation,
-  runQuery,
   selectConversationReport,
   sendFeedback,
+  sendReportEmail,
+  startQueryJob,
 } from "../api";
 import { getTheme, toggleTheme } from "../theme";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50] as const;
+const EMAIL_FORMATS = [
+  { value: "csv", label: "CSV" },
+  { value: "xlsx", label: "Excel" },
+  { value: "pdf", label: "PDF" },
+] as const;
 
+type ExportFormat = "csv" | "xlsx" | "pdf";
 type PageItem = number | "left-ellipsis" | "right-ellipsis";
+
+type PendingJobSnapshot = {
+  job_id: string;
+  conversation_id: string;
+  nl: string;
+  started_at: string;
+};
+
+type DashboardSnapshot = {
+  active_conv_id: string | null;
+  active_report_id: string | null;
+  selected_report_id: string | null;
+};
+
+const DASHBOARD_STATE_KEY = "empresa_reports_dashboard_state_v2";
+const PENDING_JOB_KEY = "empresa_reports_pending_query_job_v2";
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function saveDashboardSnapshot(snapshot: DashboardSnapshot) {
+  if (!snapshot.active_conv_id && !snapshot.active_report_id && !snapshot.selected_report_id) {
+    localStorage.removeItem(DASHBOARD_STATE_KEY);
+    return;
+  }
+  localStorage.setItem(DASHBOARD_STATE_KEY, JSON.stringify(snapshot));
+}
+
+function readDashboardSnapshot(): DashboardSnapshot | null {
+  return readJson<DashboardSnapshot>(DASHBOARD_STATE_KEY);
+}
+
+function savePendingJob(job: PendingJobSnapshot) {
+  localStorage.setItem(PENDING_JOB_KEY, JSON.stringify(job));
+}
+
+function readPendingJob(): PendingJobSnapshot | null {
+  return readJson<PendingJobSnapshot>(PENDING_JOB_KEY);
+}
+
+function clearPendingJob() {
+  localStorage.removeItem(PENDING_JOB_KEY);
+}
+
+function responseToReportData(res: QueryResponse): ReportData {
+  return {
+    columns: res.columns,
+    rows: res.rows,
+    page: res.page,
+    page_size: res.page_size,
+    row_count: res.row_count,
+    total_count: res.total_count ?? null,
+    display_total_count: res.display_total_count ?? null,
+    total_pages: res.total_pages ?? null,
+    max_result_window: res.max_result_window ?? null,
+    max_result_window_exceeded: res.max_result_window_exceeded ?? false,
+    result_message: res.result_message ?? null,
+    suppressed_columns: res.suppressed_columns ?? [],
+  };
+}
 
 function dayDiff(iso: string) {
   const a = new Date(iso);
   const b = new Date();
-
   a.setHours(0, 0, 0, 0);
   b.setHours(0, 0, 0, 0);
-
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
 
 function getPaginationItems(currentPage: number, totalPages?: number | null): PageItem[] {
   if (!totalPages || totalPages <= 1) return [currentPage];
-
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
 
   const items: PageItem[] = [1];
-
   const start = Math.max(2, currentPage - 1);
   const end = Math.min(totalPages - 1, currentPage + 1);
 
-  if (start > 2) {
-    items.push("left-ellipsis");
-  }
-
-  for (let page = start; page <= end; page += 1) {
-    items.push(page);
-  }
-
-  if (end < totalPages - 1) {
-    items.push("right-ellipsis");
-  }
-
+  if (start > 2) items.push("left-ellipsis");
+  for (let page = start; page <= end; page += 1) items.push(page);
+  if (end < totalPages - 1) items.push("right-ellipsis");
   items.push(totalPages);
 
   return items;
@@ -63,28 +126,19 @@ function getPaginationItems(currentPage: number, totalPages?: number | null): Pa
 function ChatLoader({ label = "Procesando reporte" }: { label?: string }) {
   return (
     <div className="mb-4 flex items-start gap-3">
-      <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 shrink-0">
-        A
-      </div>
-
+      <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 shrink-0">A</div>
       <div className="chat-inline-loader bg-white dark:bg-slate-900 border border-lime-200 dark:border-slate-800 shadow-sm rounded-2xl px-4 py-3 w-full max-w-xl">
         <div className="flex items-center justify-between gap-4 mb-3">
           <div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {label}
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              Preparando resultados...
-            </div>
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{label}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Preparando resultados...</div>
           </div>
-
           <div className="flex items-center gap-1 text-lime-700 dark:text-slate-300">
             <span className="chat-loader-dot" />
             <span className="chat-loader-dot" />
             <span className="chat-loader-dot" />
           </div>
         </div>
-
         <div className="space-y-2">
           <div className="chat-loader-line w-full" />
           <div className="chat-loader-line w-4/5" />
@@ -95,13 +149,19 @@ function ChatLoader({ label = "Procesando reporte" }: { label?: string }) {
   );
 }
 
+function formatCell(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export default function Dashboard() {
+  const authUser = getAuthUser();
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
 
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
-
   const [reports, setReports] = useState<ReportMeta[]>([]);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -111,17 +171,28 @@ export default function Dashboard() {
   const [pageSizesById, setPageSizesById] = useState<Record<string, number>>({});
 
   const [nl, setNl] = useState("");
-
   const [loading, setLoading] = useState(false);
   const [loadingLabel, setLoadingLabel] = useState("Procesando reporte");
   const [err, setErr] = useState<string | null>(null);
-
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
-  const overlayVisible = leftOpen || rightOpen;
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailFormats, setEmailFormats] = useState<ExportFormat[]>(["xlsx"]);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailErr, setEmailErr] = useState<string | null>(null);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
 
-  const getReportPageSize = (reportId: string) =>
-    pageSizesById[reportId] ?? DEFAULT_PAGE_SIZE;
+  const [pendingJob, setPendingJob] = useState<PendingJobSnapshot | null>(() => readPendingJob());
+  const viewRequestRef = useRef(0);
+  const pollTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  const overlayVisible = leftOpen || rightOpen;
+  const exportReportId = selectedReportId || activeReportId;
+  const exportReport = exportReportId ? reports.find((r) => r.report_id === exportReportId) ?? null : null;
+  const exportReportText = exportReport?.nl ?? null;
+  const theme = getTheme();
+
+  const getReportPageSize = (reportId: string) => pageSizesById[reportId] ?? DEFAULT_PAGE_SIZE;
 
   const closeMenus = () => {
     setLeftOpen(false);
@@ -135,7 +206,69 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    refreshConversations().catch(() => {});
+    saveDashboardSnapshot({
+      active_conv_id: activeConvId,
+      active_report_id: activeReportId,
+      selected_report_id: selectedReportId,
+    });
+  }, [activeConvId, activeReportId, selectedReportId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function boot() {
+      const snapshot = readDashboardSnapshot();
+      const storedPending = readPendingJob();
+
+      try {
+        await refreshConversations();
+      } catch {
+        // La pantalla puede cargar aunque el historial falle temporalmente.
+      }
+
+      if (cancelled) return;
+
+      if (storedPending) {
+        setPendingJob(storedPending);
+        setActiveConvId(storedPending.conversation_id);
+        setLoadingLabel("Generando reporte");
+        setLoading(true);
+        return;
+      }
+
+      try {
+        const activeJobs = await listActiveQueryJobs();
+        if (cancelled) return;
+        if (activeJobs.length > 0) {
+          const job = activeJobs[0];
+          const pending = {
+            job_id: job.job_id,
+            conversation_id: job.conversation_id,
+            nl: job.nl,
+            started_at: job.created_at,
+          };
+          savePendingJob(pending);
+          setPendingJob(pending);
+          setActiveConvId(job.conversation_id);
+          setLoadingLabel("Generando reporte");
+          setLoading(true);
+          return;
+        }
+      } catch {
+        // Si falla la recuperación de trabajos, aún intentamos restaurar el último chat.
+      }
+
+      if (snapshot?.active_conv_id && !cancelled) {
+        await openConversation(snapshot.active_conv_id, { preferReportId: snapshot.active_report_id || snapshot.selected_report_id });
+      }
+    }
+
+    boot();
+
+    return () => {
+      cancelled = true;
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -143,18 +276,12 @@ export default function Dashboard() {
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as HTMLElement | null;
-
-      if (target?.closest("[data-chat-menu-root]")) {
-        return;
-      }
-
+      if (target?.closest("[data-chat-menu-root]")) return;
       setMenuFor(null);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setMenuFor(null);
-      }
+      if (event.key === "Escape") setMenuFor(null);
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -173,7 +300,6 @@ export default function Dashboard() {
 
     for (const c of convs) {
       const d = dayDiff(c.updated_at);
-
       if (d <= 1) ayer.push(c);
       else if (d <= 7) semana.push(c);
       else mes.push(c);
@@ -182,13 +308,15 @@ export default function Dashboard() {
     return { ayer, semana, mes };
   }, [convs]);
 
-  async function openConversation(conversationId: string) {
+  async function openConversation(conversationId: string, options: { preferReportId?: string | null } = {}) {
+    const requestId = ++viewRequestRef.current;
     setErr(null);
     setLoadingLabel("Cargando conversación");
     setLoading(true);
 
     try {
       const detail = await getConversation(conversationId);
+      if (requestId !== viewRequestRef.current) return;
 
       setActiveConvId(detail.conversation.conversation_id);
       setReports(detail.reports);
@@ -196,11 +324,9 @@ export default function Dashboard() {
       const sel = detail.conversation.selected_report_id;
       setSelectedReportId(sel);
 
-      const last = detail.reports.length
-        ? detail.reports[detail.reports.length - 1].report_id
-        : null;
-
-      const toShow = sel || last;
+      const last = detail.reports.length ? detail.reports[detail.reports.length - 1].report_id : null;
+      const preferred = options.preferReportId && detail.reports.some((r) => r.report_id === options.preferReportId) ? options.preferReportId : null;
+      const toShow = preferred || sel || last;
       setActiveReportId(toShow);
 
       const nextTables: Record<string, ReportData | null> = {};
@@ -211,7 +337,6 @@ export default function Dashboard() {
         detail.reports.map(async (r) => {
           const size = getReportPageSize(r.report_id);
           nextPageSizes[r.report_id] = size;
-
           try {
             const data = await getReportData(r.report_id, 1, size);
             nextTables[r.report_id] = data;
@@ -223,15 +348,19 @@ export default function Dashboard() {
         })
       );
 
+      if (requestId !== viewRequestRef.current) return;
       setTablesById(nextTables);
       setPagesById(nextPages);
       setPageSizesById(nextPageSizes);
-
       closeMenus();
     } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Error");
+      if (requestId === viewRequestRef.current) {
+        setErr(ex instanceof Error ? ex.message : "Error");
+      }
     } finally {
-      setLoading(false);
+      if (requestId === viewRequestRef.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -244,7 +373,6 @@ export default function Dashboard() {
     try {
       const size = getReportPageSize(reportId);
       const data = await getReportData(reportId, 1, size);
-
       setTablesById((prev) => ({ ...prev, [reportId]: data }));
       setPagesById((prev) => ({ ...prev, [reportId]: 1 }));
     } catch (ex) {
@@ -253,6 +381,99 @@ export default function Dashboard() {
       setLoading(false);
     }
   }
+
+  async function finishCompletedJob(job: QueryJob) {
+    clearPendingJob();
+    setPendingJob(null);
+
+    const result = job.result;
+    if (!result) {
+      await openConversation(job.conversation_id, { preferReportId: job.report_id });
+      return;
+    }
+
+    await selectConversationReport(result.conversation_id, result.report_id).catch(() => {});
+    await refreshConversations();
+
+    const detail = await getConversation(result.conversation_id);
+    setActiveConvId(detail.conversation.conversation_id);
+    setReports(detail.reports);
+    setSelectedReportId(detail.conversation.selected_report_id || result.report_id);
+    setActiveReportId(result.report_id);
+
+    const firstPageData = responseToReportData(result);
+    setTablesById((prev) => ({ ...prev, [result.report_id]: firstPageData }));
+    setPagesById((prev) => ({ ...prev, [result.report_id]: firstPageData.page ?? 1 }));
+    setPageSizesById((prev) => ({ ...prev, [result.report_id]: result.page_size || DEFAULT_PAGE_SIZE }));
+    setNl("");
+    setLoading(false);
+    setLoadingLabel("Procesando reporte");
+  }
+
+  async function handleJobUpdate(job: QueryJob) {
+    if (job.status === "completed") {
+      await finishCompletedJob(job);
+      return;
+    }
+
+    if (job.status === "failed" || job.status === "abandoned") {
+      clearPendingJob();
+      setPendingJob(null);
+      setLoading(false);
+      setErr(job.error || "No se pudo generar el reporte");
+      await refreshConversations().catch(() => {});
+      return;
+    }
+
+    setLoadingLabel(job.status === "queued" ? "Reporte en cola" : "Generando reporte");
+    setLoading(true);
+  }
+
+  useEffect(() => {
+    if (!pendingJob) return;
+
+    let cancelled = false;
+
+    async function checkJob() {
+      try {
+        const job = await getQueryJob(pendingJob.job_id);
+        if (cancelled) return;
+        await handleJobUpdate(job);
+      } catch (ex) {
+        if (cancelled) return;
+        const message = ex instanceof Error ? ex.message : "No se pudo recuperar el estado del reporte";
+        if (message.includes("Trabajo no existe")) {
+          clearPendingJob();
+          setPendingJob(null);
+          setLoading(false);
+        } else {
+          setErr(message);
+        }
+      } finally {
+        if (!cancelled && readPendingJob()?.job_id === pendingJob.job_id) {
+          pollTimeoutRef.current = window.setTimeout(checkJob, document.hidden ? 6000 : 2000);
+        }
+      }
+    }
+
+    function onVisibilityChange() {
+      if (!document.hidden) {
+        if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+        checkJob();
+      }
+    }
+
+    setLoadingLabel("Generando reporte");
+    setLoading(true);
+    checkJob();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+    };
+  }, [pendingJob]);
 
   async function doQuery() {
     const text = nl.trim();
@@ -264,51 +485,23 @@ export default function Dashboard() {
 
     try {
       const size = activeReportId ? getReportPageSize(activeReportId) : DEFAULT_PAGE_SIZE;
-      const res = await runQuery(text, activeConvId, 1, size);
-
-      if (!activeConvId) setActiveConvId(res.conversation_id);
-
-      await refreshConversations();
-
-      const detail = await getConversation(res.conversation_id);
-      setReports(detail.reports);
-      setSelectedReportId(detail.conversation.selected_report_id);
-
-      setActiveReportId(res.report_id);
-
-      let firstPageData: ReportData = {
-        columns: res.columns,
-        rows: res.rows,
-        page: res.page,
-        page_size: res.page_size,
-        row_count: res.row_count,
-        total_count: res.total_count ?? null,
-        total_pages: res.total_pages ?? null,
+      const job = await startQueryJob(text, activeConvId, 1, size);
+      const pending = {
+        job_id: job.job_id,
+        conversation_id: job.conversation_id,
+        nl: text,
+        started_at: new Date().toISOString(),
       };
 
-      if (firstPageData.total_pages == null) {
-        firstPageData = await getReportData(res.report_id, 1, size);
-      }
-
-      setTablesById((prev) => ({
-        ...prev,
-        [res.report_id]: firstPageData,
-      }));
-
-      setPagesById((prev) => ({
-        ...prev,
-        [res.report_id]: firstPageData.page ?? 1,
-      }));
-
-      setPageSizesById((prev) => ({
-        ...prev,
-        [res.report_id]: size,
-      }));
-
+      savePendingJob(pending);
+      setPendingJob(pending);
+      setActiveConvId(job.conversation_id);
       setNl("");
+      await refreshConversations().catch(() => {});
     } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Error al generar reporte");
-    } finally {
+      clearPendingJob();
+      setPendingJob(null);
+      setErr(ex instanceof Error ? ex.message : "Error al iniciar el reporte");
       setLoading(false);
     }
   }
@@ -316,11 +509,18 @@ export default function Dashboard() {
   const isDraftNewChat = !activeConvId && reports.length === 0;
 
   function newChat() {
+    if (pendingJob) {
+      setErr("Hay un reporte generándose. Cuando termine podrás iniciar un chat nuevo sin perder el resultado.");
+      closeMenus();
+      return;
+    }
+
     if (isDraftNewChat) {
       closeMenus();
       return;
     }
 
+    viewRequestRef.current += 1;
     setErr(null);
     setActiveConvId(null);
     setReports([]);
@@ -336,7 +536,6 @@ export default function Dashboard() {
   async function doRename(conversationId: string) {
     const current = convs.find((c) => c.conversation_id === conversationId);
     const title = prompt("Nuevo nombre del chat:", current?.title ?? "");
-
     if (!title?.trim()) return;
 
     try {
@@ -357,6 +556,12 @@ export default function Dashboard() {
       setMenuFor(null);
 
       if (activeConvId === conversationId) {
+        viewRequestRef.current += 1;
+        if (pendingJob?.conversation_id === conversationId) {
+          clearPendingJob();
+          setPendingJob(null);
+          setLoading(false);
+        }
         setActiveConvId(null);
         setReports([]);
         setActiveReportId(null);
@@ -386,12 +591,9 @@ export default function Dashboard() {
   async function feedback(reportId: string, value: "up" | "down") {
     try {
       await sendFeedback(reportId, value);
-
       setReports((prev) =>
         prev.map((r) =>
-          r.report_id === reportId
-            ? { ...r, feedback: value === "up" ? "positive" : "negative" }
-            : r
+          r.report_id === reportId ? { ...r, feedback: value === "up" ? "positive" : "negative" } : r
         )
       );
     } catch (ex) {
@@ -406,7 +608,6 @@ export default function Dashboard() {
     try {
       const size = getReportPageSize(reportId);
       const data = await getReportData(reportId, next, size);
-
       setTablesById((prev) => ({ ...prev, [reportId]: data }));
       setPagesById((prev) => ({ ...prev, [reportId]: next }));
     } catch (ex) {
@@ -418,13 +619,11 @@ export default function Dashboard() {
 
   async function changePageSize(reportId: string, size: number) {
     setPageSizesById((prev) => ({ ...prev, [reportId]: size }));
-
     setLoadingLabel("Actualizando filas");
     setLoading(true);
 
     try {
       const data = await getReportData(reportId, 1, size);
-
       setTablesById((prev) => ({ ...prev, [reportId]: data }));
       setPagesById((prev) => ({ ...prev, [reportId]: 1 }));
     } catch (ex) {
@@ -434,21 +633,132 @@ export default function Dashboard() {
     }
   }
 
-  const exportReportId = selectedReportId || activeReportId;
+  function openEmailModal() {
+    setEmailErr(null);
+    setEmailMsg(null);
+    if (!exportReportId) return;
+    setEmailOpen(true);
+  }
 
-  const exportReportText =
-    (exportReportId && reports.find((r) => r.report_id === exportReportId)?.nl) || null;
+  function toggleEmailFormat(fmt: ExportFormat) {
+    setEmailFormats((prev) => (prev.includes(fmt) ? prev.filter((x) => x !== fmt) : [...prev, fmt]));
+  }
 
-  const theme = getTheme();
+  async function doSendEmail() {
+    if (!exportReportId || emailLoading) return;
+    setEmailErr(null);
+    setEmailMsg(null);
+
+    if (!emailFormats.length) {
+      setEmailErr("Selecciona al menos un formato.");
+      return;
+    }
+
+    setEmailLoading(true);
+    try {
+      const res = await sendReportEmail(exportReportId, emailFormats);
+      setEmailMsg(`Correo enviado a ${res.to}.`);
+    } catch (ex) {
+      setEmailErr(ex instanceof Error ? ex.message : "No se pudo enviar el correo");
+    } finally {
+      setEmailLoading(false);
+    }
+  }
 
   return (
     <div className="bg-gray-100 dark:bg-slate-950 overflow-hidden h-screen">
-      <div
-        className={`fixed inset-0 bg-black/50 z-30 transition-opacity lg:hidden ${
-          overlayVisible ? "" : "hidden"
-        }`}
-        onClick={closeMenus}
-      />
+      <div className={`fixed inset-0 bg-black/50 z-30 transition-opacity lg:hidden ${overlayVisible ? "" : "hidden"}`} onClick={closeMenus} />
+
+      {emailOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-lime-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+            <div className="px-6 py-5 bg-[#0083B0] text-white flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="material-icons">outgoing_mail</span>
+                <div>
+                  <h3 className="font-bold text-xl">Enviar reporte por correo</h3>
+                  <p className="text-cyan-50 text-sm">Se enviará al correo vinculado a tu usuario.</p>
+                </div>
+              </div>
+              <button className="w-10 h-10 rounded-full hover:bg-white/15 transition flex items-center justify-center" type="button" onClick={() => setEmailOpen(false)}>
+                <span className="material-icons">close</span>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#0083B0] dark:text-lime-300 mb-1">Destino</div>
+                <div className="rounded-xl border border-cyan-100 dark:border-slate-800 bg-cyan-50/60 dark:bg-slate-950 px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
+                  {authUser?.email ? authUser.email : "Tu usuario no tiene correo configurado"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#0083B0] dark:text-lime-300 mb-1">Reporte</div>
+                <div className="rounded-xl border border-cyan-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 line-clamp-3">
+                  {exportReportText || "Ninguno seleccionado"}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#0083B0] dark:text-lime-300">Formatos</div>
+                  <button
+                    type="button"
+                    className="text-xs font-bold text-[#0083B0] dark:text-lime-300 hover:underline"
+                    onClick={() => setEmailFormats(emailFormats.length === 3 ? [] : ["csv", "xlsx", "pdf"])}
+                  >
+                    {emailFormats.length === 3 ? "Quitar todos" : "Marcar todos"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {EMAIL_FORMATS.map((fmt) => {
+                    const active = emailFormats.includes(fmt.value);
+                    return (
+                      <button
+                        key={fmt.value}
+                        type="button"
+                        onClick={() => toggleEmailFormat(fmt.value)}
+                        className={[
+                          "rounded-xl border px-4 py-3 flex items-center justify-center gap-2 font-bold transition",
+                          active
+                            ? "bg-[#C6EB32] border-lime-300 text-[#005f80]"
+                            : "bg-white dark:bg-slate-950 border-cyan-100 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-800",
+                        ].join(" ")}
+                      >
+                        <span className="material-icons text-[20px]">{active ? "check_circle" : "radio_button_unchecked"}</span>
+                        {fmt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {emailErr && <div className="rounded-xl bg-red-100 border border-red-200 text-red-700 p-3 text-sm">{emailErr}</div>}
+              {emailMsg && <div className="rounded-xl bg-lime-100 border border-lime-200 text-lime-800 p-3 text-sm">{emailMsg}</div>}
+
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Se respetan los mismos permisos de exportación y columnas ocultas del perfil. Si una columna está oculta, tampoco se adjunta por correo.
+              </p>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-950 flex justify-end gap-2">
+              <button className="px-4 py-2.5 rounded-lg bg-white dark:bg-slate-800 border border-cyan-100 dark:border-slate-700 font-bold" type="button" onClick={() => setEmailOpen(false)}>
+                Cerrar
+              </button>
+              <button
+                className="px-5 py-2.5 rounded-lg bg-[#C6EB32] hover:bg-lime-300 text-[#005f80] font-bold transition disabled:opacity-60"
+                type="button"
+                disabled={emailLoading || !exportReportId || !emailFormats.length}
+                onClick={doSendEmail}
+              >
+                {emailLoading ? "Enviando..." : "Enviar correo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="ui-scale flex relative h-screen min-h-0">
         <aside
@@ -461,12 +771,7 @@ export default function Dashboard() {
         >
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-2xl font-bold">empresa REPORTS</h1>
-
-            <button
-              className="lg:hidden text-white hover:text-cyan-200"
-              onClick={closeMenus}
-              type="button"
-            >
+            <button className="lg:hidden text-white hover:text-cyan-200" onClick={closeMenus} type="button">
               <span className="material-icons">close</span>
             </button>
           </div>
@@ -483,24 +788,15 @@ export default function Dashboard() {
 
           <nav className="flex-grow overflow-y-auto overflow-x-hidden scrollbar-subtle">
             {(["ayer", "semana", "mes"] as const).map((k) => {
-              const label =
-                k === "ayer" ? "Ayer" : k === "semana" ? "Última semana" : "Último mes";
-
+              const label = k === "ayer" ? "Ayer" : k === "semana" ? "Última semana" : "Último mes";
               const items = grouped[k];
 
               return (
                 <div key={k}>
-                  <h2 className="text-sm font-semibold text-cyan-100 uppercase mb-4 mt-6">
-                    {label}
-                  </h2>
-
+                  <h2 className="text-sm font-semibold text-cyan-100 uppercase mb-4 mt-6">{label}</h2>
                   <ul>
                     {items.map((c) => (
-                      <li
-                        className="mb-3 relative min-w-0"
-                        key={c.conversation_id}
-                        data-chat-menu-root
-                      >
+                      <li className="mb-3 relative min-w-0" key={c.conversation_id} data-chat-menu-root>
                         <div className="flex items-center justify-between gap-2 min-w-0">
                           <button
                             onClick={() => openConversation(c.conversation_id)}
@@ -514,13 +810,8 @@ export default function Dashboard() {
                             <span className="material-icons mr-3">bar_chart</span>
                             <span className="truncate min-w-0">{c.title}</span>
                           </button>
-
                           <button
-                            onClick={() =>
-                              setMenuFor((prev) =>
-                                prev === c.conversation_id ? null : c.conversation_id
-                              )
-                            }
+                            onClick={() => setMenuFor((prev) => (prev === c.conversation_id ? null : c.conversation_id))}
                             className="text-cyan-100 hover:text-white rounded-full p-1 hover:bg-white/10"
                             title="Opciones"
                             type="button"
@@ -531,20 +822,11 @@ export default function Dashboard() {
 
                         {menuFor === c.conversation_id && (
                           <div className="absolute right-2 mt-2 w-44 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-xl shadow-xl soft-popover z-50 overflow-hidden border border-gray-100 dark:border-slate-700">
-                            <button
-                              className="w-full text-left px-3 py-2.5 hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                              onClick={() => doRename(c.conversation_id)}
-                              type="button"
-                            >
+                            <button className="w-full text-left px-3 py-2.5 hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2" onClick={() => doRename(c.conversation_id)} type="button">
                               <span className="material-icons text-[18px]">edit</span>
                               Renombrar
                             </button>
-
-                            <button
-                              className="w-full text-left px-3 py-2.5 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-700 dark:text-red-300 flex items-center gap-2"
-                              onClick={() => doDelete(c.conversation_id)}
-                              type="button"
-                            >
+                            <button className="w-full text-left px-3 py-2.5 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-700 dark:text-red-300 flex items-center gap-2" onClick={() => doDelete(c.conversation_id)} type="button">
                               <span className="material-icons text-[18px]">delete</span>
                               Eliminar
                             </button>
@@ -552,10 +834,7 @@ export default function Dashboard() {
                         )}
                       </li>
                     ))}
-
-                    {items.length === 0 && (
-                      <li className="text-cyan-100 text-sm opacity-80">Sin chats</li>
-                    )}
+                    {items.length === 0 && <li className="text-cyan-100 text-sm opacity-80">Sin chats</li>}
                   </ul>
                 </div>
               );
@@ -589,12 +868,7 @@ export default function Dashboard() {
                 <span className="material-icons text-3xl">file_download</span>
               </button>
 
-              <button
-                onClick={() => toggleTheme()}
-                className="text-gray-600 dark:text-slate-200"
-                title={`Tema: ${theme}`}
-                type="button"
-              >
+              <button onClick={() => toggleTheme()} className="text-gray-600 dark:text-slate-200" title={`Tema: ${theme}`} type="button">
                 <span className="material-icons">brightness_6</span>
               </button>
 
@@ -610,10 +884,8 @@ export default function Dashboard() {
                 <span className="material-icons">logout</span>
               </button>
 
-              <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center">
-                <span className="material-icons text-gray-600 dark:text-slate-200">
-                  person
-                </span>
+              <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center" title={authUser?.username}>
+                <span className="material-icons text-gray-600 dark:text-slate-200">person</span>
               </div>
             </div>
           </header>
@@ -623,9 +895,7 @@ export default function Dashboard() {
               <div className="flex-1 overflow-y-auto min-h-0 scrollbar-subtle">
                 {err && (
                   <div className="mb-4">
-                    <div className="text-sm text-red-700 bg-red-100 rounded-md p-2">
-                      {err}
-                    </div>
+                    <div className="text-sm text-red-700 bg-red-100 rounded-md p-2">{err}</div>
                   </div>
                 )}
 
@@ -634,7 +904,6 @@ export default function Dashboard() {
                     {reports.map((r) => {
                       const isActive = r.report_id === activeReportId;
                       const isSelected = r.report_id === selectedReportId;
-
                       const t = tablesById[r.report_id] ?? null;
                       const page = pagesById[r.report_id] ?? 1;
                       const reportPageSize = getReportPageSize(r.report_id);
@@ -668,65 +937,62 @@ export default function Dashboard() {
                             title={r.nl}
                             type="button"
                           >
-                            <p className="text-lime-900 dark:text-slate-100 line-clamp-2">
-                              {r.nl}
-                            </p>
-
+                            <p className="text-lime-900 dark:text-slate-100 line-clamp-2">{r.nl}</p>
                             <div className="ml-4 flex items-center gap-2 shrink-0">
-                              {isSelected && (
-                                <span className="text-[11px] font-bold rounded-full bg-lime-700 text-white px-2 py-0.5">
-                                  SELECCIONADO
-                                </span>
-                              )}
-
-                              <span className="text-xs text-lime-900/80 dark:text-slate-300">
-                                {r.latency_ms}ms
-                              </span>
+                              {isSelected && <span className="text-[11px] font-bold rounded-full bg-lime-700 text-white px-2 py-0.5">SELECCIONADO</span>}
+                              <span className="text-xs text-lime-900/80 dark:text-slate-300">{r.latency_ms}ms</span>
                             </div>
                           </button>
 
                           <div className="bg-white dark:bg-slate-900 dark:text-slate-50 shadow-md overflow-hidden">
                             <div className="flex items-center p-4">
-                              <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 mr-4">
-                                A
-                              </div>
-
+                              <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 mr-4">A</div>
                               <div className="text-sm text-gray-600 dark:text-slate-300">
-                                {t
-                                  ? `Reporte cargado${
-                                      t.total_count != null ? ` · ${t.total_count} filas` : ""
-                                    }`
-                                  : "Cargando reporte..."}
+                                {t ? `Reporte cargado${t.total_count != null ? ` · ${t.total_count} filas` : ""}` : "Cargando reporte..."}
                               </div>
                             </div>
+
+                            {t?.result_message && (
+                              <div className="mx-4 mb-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 px-3 py-2 text-sm">
+                                {t.result_message}
+                              </div>
+                            )}
+
+                            {!!t?.suppressed_columns?.length && (
+                              <div className="mx-4 mb-3 rounded-lg bg-cyan-50 dark:bg-slate-800 border border-cyan-100 dark:border-slate-700 text-cyan-800 dark:text-slate-200 px-3 py-2 text-xs">
+                                Columnas ocultas por tu perfil: {t.suppressed_columns.join(", ")}
+                              </div>
+                            )}
 
                             <div className="overflow-x-auto w-full">
                               <table className="w-full text-sm text-left text-gray-500 dark:text-slate-200 whitespace-nowrap lg:whitespace-normal">
                                 <thead className="text-xs text-gray-700 dark:text-slate-200 uppercase bg-gray-50 dark:bg-slate-800">
                                   <tr>
-                                    {(t?.columns || ["Sin datos"]).map((c) => (
+                                    {(t?.columns?.length ? t.columns : ["Sin datos"]).map((c) => (
                                       <th key={c} className="px-6 py-3">
                                         {c}
                                       </th>
                                     ))}
                                   </tr>
                                 </thead>
-
                                 <tbody>
                                   {!t && (
                                     <tr className="bg-white dark:bg-slate-900 border-b dark:border-slate-800">
                                       <td className="px-6 py-4">Sin resultados</td>
                                     </tr>
                                   )}
-
+                                  {t && t.rows.length === 0 && (
+                                    <tr className="bg-white dark:bg-slate-900 border-b dark:border-slate-800">
+                                      <td className="px-6 py-4" colSpan={Math.max(t.columns.length, 1)}>
+                                        La consulta no devolvió filas.
+                                      </td>
+                                    </tr>
+                                  )}
                                   {t?.rows?.map((row, idx) => (
-                                    <tr
-                                      key={idx}
-                                      className="bg-white dark:bg-slate-900 border-b dark:border-slate-800"
-                                    >
+                                    <tr key={idx} className="bg-white dark:bg-slate-900 border-b dark:border-slate-800">
                                       {t.columns.map((c) => (
                                         <td key={c} className="px-6 py-4">
-                                          {String(row[c] ?? "")}
+                                          {formatCell(row[c])}
                                         </td>
                                       ))}
                                     </tr>
@@ -737,16 +1003,11 @@ export default function Dashboard() {
 
                             <div className="flex flex-col sm:flex-row justify-between items-center p-4 border-t dark:border-slate-800 gap-4">
                               <div className="flex items-center">
-                                <span className="text-sm text-gray-700 dark:text-slate-200 mr-2">
-                                  Mostrar
-                                </span>
-
+                                <span className="text-sm text-gray-700 dark:text-slate-200 mr-2">Mostrar</span>
                                 <select
                                   className="border rounded-md p-1 outline-none dark:bg-slate-800 dark:border-slate-700"
                                   value={reportPageSize}
-                                  onChange={(e) =>
-                                    changePageSize(r.report_id, Number(e.target.value))
-                                  }
+                                  onChange={(e) => changePageSize(r.report_id, Number(e.target.value))}
                                   disabled={loading}
                                   title="Filas por página de este reporte"
                                 >
@@ -788,10 +1049,7 @@ export default function Dashboard() {
                                       {item}
                                     </button>
                                   ) : (
-                                    <span
-                                      key={item}
-                                      className="min-w-9 h-9 px-2 flex items-center justify-center text-lime-800 dark:text-slate-300 font-bold"
-                                    >
+                                    <span key={item} className="min-w-9 h-9 px-2 flex items-center justify-center text-lime-800 dark:text-slate-300 font-bold">
                                       ...
                                     </span>
                                   )
@@ -799,13 +1057,7 @@ export default function Dashboard() {
 
                                 <button
                                   className="p-2 rounded-lg text-lime-700 hover:text-lime-900 hover:bg-lime-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-40"
-                                  disabled={
-                                    !t ||
-                                    loading ||
-                                    (t.total_pages
-                                      ? page >= t.total_pages
-                                      : t.row_count < t.page_size)
-                                  }
+                                  disabled={!t || loading || (t.total_pages ? page >= t.total_pages : t.row_count < t.page_size)}
                                   onClick={() => changePage(r.report_id, page + 1)}
                                   type="button"
                                   title="Página siguiente"
@@ -871,15 +1123,9 @@ export default function Dashboard() {
                 ) : !loading ? (
                   <div className="bg-white dark:bg-slate-900 dark:text-slate-50 shadow-md rounded-lg overflow-hidden">
                     <div className="flex items-center p-4">
-                      <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 mr-4">
-                        A
-                      </div>
-
-                      <div className="text-sm text-gray-600 dark:text-slate-300">
-                        Abre un chat o crea uno nuevo.
-                      </div>
+                      <div className="bg-amber-300 rounded-full w-8 h-8 flex items-center justify-center font-bold text-amber-800 mr-4">A</div>
+                      <div className="text-sm text-gray-600 dark:text-slate-300">Abre un chat o crea uno nuevo.</div>
                     </div>
-
                     <div className="overflow-x-auto w-full">
                       <table className="w-full text-sm text-left text-gray-500 dark:text-slate-200 whitespace-nowrap lg:whitespace-normal">
                         <thead className="text-xs text-gray-700 dark:text-slate-200 uppercase bg-gray-50 dark:bg-slate-800">
@@ -887,7 +1133,6 @@ export default function Dashboard() {
                             <th className="px-6 py-3">Sin datos</th>
                           </tr>
                         </thead>
-
                         <tbody>
                           <tr className="bg-white dark:bg-slate-900 border-b dark:border-slate-800">
                             <td className="px-6 py-4">Sin resultados</td>
@@ -912,16 +1157,13 @@ export default function Dashboard() {
                     if (e.key === "Enter" && !loading && nl.trim()) doQuery();
                   }}
                 />
-
                 <button
                   className="bg-lime-700 hover:bg-lime-800 dark:bg-slate-700 dark:hover:bg-slate-600 transition-colors p-2 rounded-full ml-4 flex items-center justify-center disabled:opacity-70"
                   onClick={doQuery}
                   disabled={loading || !nl.trim()}
                   type="button"
                 >
-                  <span className="material-icons text-white">
-                    {loading ? "hourglass_top" : "send"}
-                  </span>
+                  <span className="material-icons text-white">{loading ? "hourglass_top" : "send"}</span>
                 </button>
               </div>
             </div>
@@ -934,33 +1176,21 @@ export default function Dashboard() {
               ].join(" ")}
             >
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-lime-800 dark:text-slate-100">
-                  Exportación del reporte generado
-                </h2>
-
-                <button
-                  className="lg:hidden text-lime-800 dark:text-slate-200 hover:text-lime-900 dark:hover:text-white"
-                  onClick={closeMenus}
-                  type="button"
-                >
+                <h2 className="text-xl font-bold text-lime-800 dark:text-slate-100">Exportación del reporte generado</h2>
+                <button className="lg:hidden text-lime-800 dark:text-slate-200 hover:text-lime-900 dark:hover:text-white" onClick={closeMenus} type="button">
                   <span className="material-icons">close</span>
                 </button>
               </div>
 
               <div className="mb-4">
-                <div className="text-xs font-semibold text-lime-800 dark:text-slate-300 mb-1">
-                  Reporte actual
-                </div>
-
+                <div className="text-xs font-semibold text-lime-800 dark:text-slate-300 mb-1">Reporte actual</div>
                 <div className="text-sm text-lime-900 dark:text-slate-100 bg-lime-200/60 dark:bg-slate-800/70 rounded-md p-2">
                   {exportReportText ? exportReportText : "Ninguno seleccionado"}
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="font-semibold text-lime-800 dark:text-slate-200">
-                  Exportar
-                </div>
+                <div className="font-semibold text-lime-800 dark:text-slate-200">Exportar</div>
 
                 {(["csv", "xlsx", "pdf"] as const).map((fmt) => (
                   <div
@@ -972,29 +1202,23 @@ export default function Dashboard() {
                     }}
                     title={exportReportId ? `Exportar ${fmt}` : "Selecciona un reporte"}
                   >
-                    <span className="text-lime-800 dark:text-slate-200">
-                      {fmt === "csv" ? "CSV" : fmt === "xlsx" ? "Excel" : "PDF"}
-                    </span>
-
+                    <span className="text-lime-800 dark:text-slate-200">{fmt === "csv" ? "CSV" : fmt === "xlsx" ? "Excel" : "PDF"}</span>
                     <button className="text-lime-800 dark:text-slate-200" type="button">
                       <span className="material-icons">file_download</span>
                     </button>
                   </div>
                 ))}
 
-                <div
-                  className="flex justify-between items-center py-2 px-2 rounded transition-colors opacity-60"
-                  title="Funcionalidad no habilitada todavía"
-                  aria-disabled="true"
+                <button
+                  className="w-full flex justify-between items-center py-2 px-2 rounded transition-colors border-b border-lime-400 dark:border-slate-700 hover:bg-lime-400/30 dark:hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                  title={exportReportId ? "Enviar reporte por correo" : "Selecciona un reporte"}
+                  disabled={!exportReportId}
+                  onClick={openEmailModal}
+                  type="button"
                 >
-                  <span className="text-lime-800 dark:text-slate-200">
-                    Enviar por correo
-                  </span>
-
-                  <button className="text-lime-800 dark:text-slate-200" type="button" disabled>
-                    <span className="material-icons">send</span>
-                  </button>
-                </div>
+                  <span className="text-lime-800 dark:text-slate-200">Enviar por correo</span>
+                  <span className="text-lime-800 dark:text-slate-200 material-icons">send</span>
+                </button>
               </div>
             </aside>
           </div>

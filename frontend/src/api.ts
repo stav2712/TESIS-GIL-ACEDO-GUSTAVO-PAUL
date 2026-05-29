@@ -40,6 +40,7 @@ export type ReportData = {
   max_result_window?: number | null;
   max_result_window_exceeded?: boolean;
   result_message?: string | null;
+  suppressed_columns?: string[];
 };
 
 export type QueryResponse = ReportData & {
@@ -52,13 +53,45 @@ export type QueryResponse = ReportData & {
   can_view_sql?: boolean;
 };
 
+export type QueryJobStatus = "queued" | "running" | "completed" | "failed" | "abandoned";
+
+export type QueryJobStart = {
+  job_id: string;
+  conversation_id: string;
+  status: QueryJobStatus;
+};
+
+export type QueryJob = {
+  job_id: string;
+  conversation_id: string;
+  nl: string;
+  page: number;
+  page_size: number;
+  status: QueryJobStatus;
+  report_id: string | null;
+  error: string | null;
+  result: QueryResponse | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+export type ColumnPermissionRule = {
+  hidden?: string[];
+  forbidden?: string[];
+};
+
+export type ColumnPermissions = Record<string, ColumnPermissionRule>;
+export type TableAccessMode = "all" | "custom";
+
 export type Profile = {
   id: number;
   name: string;
   description: string;
   permissions: Record<string, boolean>;
   allowed_tables: string[];
-  // Se conserva por compatibilidad con perfiles creados antes, pero el límite visual real ahora es global.
+  table_access_mode?: TableAccessMode;
+  column_permissions?: ColumnPermissions;
   max_display_rows?: number;
   max_page_size: number;
   is_system: boolean;
@@ -69,6 +102,8 @@ export type ProfilePayload = {
   description?: string;
   permissions?: Record<string, boolean>;
   allowed_tables?: string[];
+  table_access_mode?: TableAccessMode;
+  column_permissions?: ColumnPermissions;
   max_page_size?: number;
 };
 
@@ -76,6 +111,7 @@ export type AppUser = {
   id: number;
   username: string;
   full_name: string | null;
+  email?: string | null;
   profile: string | null;
   profile_id: number | null;
   is_active: boolean;
@@ -128,6 +164,8 @@ export type SystemConfig = {
   export_max_rows_meaning: string;
   export_page_size: number;
   query_timeout_seconds: number;
+  email_enabled?: boolean;
+  email_from?: string | null;
   translator_timeout_seconds: number;
   schema_profile_path: string;
   allowed_tables: string[];
@@ -140,6 +178,11 @@ export type SystemConfig = {
     query_timeout_seconds: NumericLimit;
   };
   warnings?: string[];
+};
+
+export type SystemSchema = {
+  tables: Record<string, string[]>;
+  errors?: Record<string, string>;
 };
 
 export type SystemConfigUpdatePayload = Partial<{
@@ -163,33 +206,212 @@ export type SystemStatus = {
   services: SystemServiceStatus[];
 };
 
-async function errorFromResponse(res: Response): Promise<string> {
-  const raw = await res.text();
+export class ApiError extends Error {
+  status: number;
+  technicalDetail: unknown;
 
-  if (!raw) return `Error HTTP ${res.status}`;
+  constructor(message: string, status: number, technicalDetail: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.technicalDetail = technicalDetail;
+  }
+}
 
+type RawValidationError = {
+  type?: string;
+  loc?: unknown[];
+  msg?: string;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
+};
+
+function fieldLabel(loc: unknown): string {
+  const parts = Array.isArray(loc) ? loc : [];
+  const last = String(parts[parts.length - 1] ?? "campo");
+  const labels: Record<string, string> = {
+    username: "usuario",
+    password: "contraseña",
+    full_name: "nombre completo",
+    email: "correo electrónico",
+    profile_id: "perfil",
+    name: "nombre",
+    description: "descripción",
+    permissions: "permisos",
+    allowed_tables: "vistas permitidas",
+    table_access_mode: "modo de acceso a vistas",
+    column_permissions: "permisos por columna",
+    max_page_size: "tamaño de página",
+    nl: "pregunta",
+    conversation_id: "conversación",
+    report_id: "reporte",
+    value: "valor",
+    formats: "formatos",
+    page: "página",
+    page_size: "tamaño de página",
+    query_display_max_rows: "límite de visualización",
+    export_max_rows: "límite de exportación",
+    query_timeout_seconds: "tiempo máximo de consulta",
+  };
+  return labels[last] ?? last;
+}
+
+function messageFromValidationErrors(errors: RawValidationError[]): string {
+  if (!errors.length) {
+    return "Revisa los campos ingresados. Hay datos obligatorios o con formato inválido.";
+  }
+
+  const first = errors[0];
+  const field = fieldLabel(first.loc);
+  const type = String(first.type ?? "");
+  const minLength = first.ctx?.min_length;
+  const maxLength = first.ctx?.max_length;
+
+  if (type === "missing") return `El campo ${field} es obligatorio.`;
+
+  if (type.includes("string_too_short")) {
+    if (field === "contraseña") return "La contraseña debe tener al menos 6 caracteres.";
+    if (field === "usuario") return "El usuario debe tener al menos 3 caracteres.";
+    return typeof minLength === "number"
+      ? `El campo ${field} debe tener al menos ${minLength} caracteres.`
+      : `El campo ${field} es demasiado corto.`;
+  }
+
+  if (type.includes("string_too_long")) {
+    return typeof maxLength === "number"
+      ? `El campo ${field} supera el tamaño máximo de ${maxLength} caracteres.`
+      : `El campo ${field} supera el tamaño máximo permitido.`;
+  }
+
+  if (type.includes("int") || type.includes("float") || type.includes("number") || type.includes("greater_than") || type.includes("less_than")) {
+    return `El campo ${field} debe tener un valor numérico válido dentro del rango permitido.`;
+  }
+
+  if (type.includes("bool")) return `El campo ${field} debe tener un valor válido.`;
+
+  return "Revisa los campos ingresados. Hay datos obligatorios o con formato inválido.";
+}
+
+function looksTechnical(text: string): boolean {
+  const compact = text.trim();
+  if (!compact) return true;
+  if (compact.startsWith("[") || compact.startsWith("{") || compact.includes('"loc"') || compact.includes('"type"')) return true;
+  if (/Traceback|SQLAlchemy|psycopg|SELECT\s|INSERT\s|UPDATE\s|DELETE\s|DROP\s|ALTER\s|stack|Exception/i.test(compact)) return true;
+  return compact.length > 350;
+}
+
+function friendlyFromStatus(status: number): string {
+  if (status === 400) return "No se pudo procesar la solicitud. Revisa los datos ingresados.";
+  if (status === 401) return "Tu sesión expiró o no es válida. Inicia sesión nuevamente.";
+  if (status === 403) return "No tienes permisos para realizar esta operación.";
+  if (status === 404) return "No se encontró el recurso solicitado.";
+  if (status === 409) return "No se pudo completar la operación porque el registro ya existe o está en uso.";
+  if (status === 422) return "Revisa los campos ingresados. Hay datos obligatorios o con formato inválido.";
+  if (status === 502) return "No se pudo conectar con uno de los servicios internos. Verifica que el sistema esté iniciado.";
+  if (status === 503) return "El servicio no está disponible temporalmente. Revisa la configuración o intenta nuevamente.";
+  if (status === 504) return "La operación tardó demasiado y fue cancelada. Intenta con una consulta más específica.";
+  if (status >= 500) return "No se pudo completar la operación por un error interno. Inténtalo nuevamente o contacta al administrador.";
+  return `No se pudo completar la operación. Código HTTP ${status}.`;
+}
+
+function extractDetail(parsed: unknown): unknown {
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    return obj.detail ?? obj.error ?? parsed;
+  }
+  return parsed;
+}
+
+function friendlyMessageFromPayload(status: number, parsed: unknown, raw: string): string {
+  const detail = extractDetail(parsed);
+
+  if (Array.isArray(detail)) {
+    return messageFromValidationErrors(detail as RawValidationError[]);
+  }
+
+  if (detail && typeof detail === "object") {
+    const obj = detail as Record<string, unknown>;
+    const nestedDetail = obj.detail;
+    const nestedError = obj.error;
+
+    if (Array.isArray(nestedDetail)) {
+      return messageFromValidationErrors(nestedDetail as RawValidationError[]);
+    }
+
+    if (typeof nestedError === "string" && !looksTechnical(nestedError)) {
+      return nestedError;
+    }
+
+    if (typeof nestedDetail === "string" && !looksTechnical(nestedDetail)) {
+      return nestedDetail;
+    }
+
+    return friendlyFromStatus(status);
+  }
+
+  if (typeof detail === "string") {
+    const text = detail.trim();
+
+    try {
+      const nested = JSON.parse(text);
+      return friendlyMessageFromPayload(status, nested, text);
+    } catch {
+      if (!looksTechnical(text)) return text;
+    }
+  }
+
+  if (raw && !looksTechnical(raw)) return raw;
+  return friendlyFromStatus(status);
+}
+
+function parseRawError(raw: string): unknown {
+  if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw);
-    const detail = parsed?.detail ?? parsed?.error ?? parsed;
-
-    if (typeof detail === "string") {
-      try {
-        const nested = JSON.parse(detail);
-        return nested?.detail?.error || nested?.detail || nested?.error || detail;
-      } catch {
-        return detail;
-      }
-    }
-
-    if (typeof detail?.error === "string") {
-      const extra = detail.detail ? `: ${detail.detail}` : "";
-      return `${detail.error}${extra}`;
-    }
-
-    return JSON.stringify(detail, null, 2);
+    return JSON.parse(raw);
   } catch {
     return raw;
   }
+}
+
+async function errorFromResponse(res: Response, url: string): Promise<ApiError> {
+  const raw = await res.text();
+  const parsed = parseRawError(raw);
+  const message = raw ? friendlyMessageFromPayload(res.status, parsed, raw) : friendlyFromStatus(res.status);
+
+  console.error("[API error]", {
+    url,
+    status: res.status,
+    statusText: res.statusText,
+    detail: parsed,
+  });
+
+  return new ApiError(message, res.status, parsed);
+}
+
+export function toUserErrorMessage(error: unknown, fallback = "No se pudo completar la operación."): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) {
+    return looksTechnical(error.message) ? fallback : error.message;
+  }
+  return fallback;
+}
+
+function sanitizeErrorText(text: string | null | undefined, fallback = "No se pudo completar la operación."): string | null {
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    return friendlyMessageFromPayload(500, parsed, text);
+  } catch {
+    return looksTechnical(text) ? fallback : text;
+  }
+}
+
+function sanitizeQueryJob(job: QueryJob): QueryJob {
+  return {
+    ...job,
+    error: sanitizeErrorText(job.error, "No se pudo generar el reporte. Reformula la pregunta o intenta nuevamente."),
+  };
 }
 
 function filenameFromDisposition(disposition: string | null, fallback: string) {
@@ -216,13 +438,20 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(url, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers });
+  } catch (error) {
+    console.error("[API network error]", { url, error });
+    throw new ApiError("No se pudo conectar con el servidor. Verifica que los servicios estén ejecutándose.", 0, error);
+  }
 
   if (!res.ok) {
     if (res.status === 401) clearToken();
-    throw new Error(await errorFromResponse(res));
+    throw await errorFromResponse(res, url);
   }
 
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -249,6 +478,7 @@ export async function createUser(payload: {
   username: string;
   password: string;
   full_name?: string | null;
+  email?: string | null;
   profile_id?: number | null;
 }): Promise<AppUser> {
   return request<AppUser>("/api/identity/users", {
@@ -263,6 +493,7 @@ export async function updateUser(
     username: string;
     password: string;
     full_name: string | null;
+    email: string | null;
     profile_id: number | null;
     is_active: boolean;
   }>
@@ -345,6 +576,33 @@ export async function runQuery(
   });
 }
 
+export async function startQueryJob(
+  nl: string,
+  conversationId: string | null,
+  page: number,
+  pageSize: number
+): Promise<QueryJobStart> {
+  return request<QueryJobStart>("/api/orchestrator/query-jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      nl,
+      conversation_id: conversationId,
+      page,
+      page_size: pageSize,
+    }),
+  });
+}
+
+export async function getQueryJob(jobId: string): Promise<QueryJob> {
+  const job = await request<QueryJob>(`/api/orchestrator/query-jobs/${jobId}`);
+  return sanitizeQueryJob(job);
+}
+
+export async function listActiveQueryJobs(): Promise<QueryJob[]> {
+  const jobs = await request<QueryJob[]>("/api/orchestrator/query-jobs");
+  return jobs.map(sanitizeQueryJob);
+}
+
 // Reports
 export async function getReportMeta(reportId: string): Promise<ReportMeta> {
   return request<ReportMeta>(`/api/orchestrator/reports/${reportId}/meta`);
@@ -352,14 +610,21 @@ export async function getReportMeta(reportId: string): Promise<ReportMeta> {
 
 export async function getReportData(reportId: string, page: number, pageSize: number): Promise<ReportData> {
   const token = getToken();
+  const url = `/api/orchestrator/reports/${reportId}/data?page=${page}&page_size=${pageSize}`;
 
-  const res = await fetch(`/api/orchestrator/reports/${reportId}/data?page=${page}&page_size=${pageSize}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+  } catch (error) {
+    console.error("[API network error]", { url, error });
+    throw new ApiError("No se pudo conectar con el servidor. Verifica que los servicios estén ejecutándose.", 0, error);
+  }
 
   if (!res.ok) {
     if (res.status === 401) clearToken();
-    throw new Error(await errorFromResponse(res));
+    throw await errorFromResponse(res, url);
   }
 
   return (await res.json()) as ReportData;
@@ -374,28 +639,52 @@ export async function sendFeedback(reportId: string, value: "up" | "down"): Prom
 
 export async function downloadExport(reportId: string, format: "csv" | "xlsx" | "pdf"): Promise<void> {
   const token = getToken();
+  const url = `/api/orchestrator/reports/${reportId}/export?format=${format}`;
 
-  const res = await fetch(`/api/orchestrator/reports/${reportId}/export?format=${format}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+  } catch (error) {
+    console.error("[API network error]", { url, error });
+    throw new ApiError("No se pudo conectar con el servidor. Verifica que los servicios estén ejecutándose.", 0, error);
+  }
 
   if (!res.ok) {
     if (res.status === 401) clearToken();
-    throw new Error(await errorFromResponse(res));
+    throw await errorFromResponse(res, url);
   }
 
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
 
-  a.href = url;
+  a.href = objectUrl;
   a.download = filenameFromDisposition(res.headers.get("Content-Disposition"), `reporte-${reportId}.${format}`);
 
   document.body.appendChild(a);
   a.click();
   a.remove();
 
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(objectUrl);
+}
+
+export type ReportEmailResponse = {
+  ok: boolean;
+  to: string;
+  formats: ("csv" | "xlsx" | "pdf")[];
+  attachments: string[];
+};
+
+export async function sendReportEmail(
+  reportId: string,
+  formats: ("csv" | "xlsx" | "pdf")[]
+): Promise<ReportEmailResponse> {
+  return request<ReportEmailResponse>(`/api/orchestrator/reports/${reportId}/email`, {
+    method: "POST",
+    body: JSON.stringify({ formats }),
+  });
 }
 
 // Admin/platform
@@ -426,6 +715,10 @@ export async function updateSystemConfig(payload: SystemConfigUpdatePayload): Pr
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export async function getSystemSchema(): Promise<SystemSchema> {
+  return request<SystemSchema>("/api/orchestrator/system/schema");
 }
 
 export async function getSystemStatus(): Promise<SystemStatus> {

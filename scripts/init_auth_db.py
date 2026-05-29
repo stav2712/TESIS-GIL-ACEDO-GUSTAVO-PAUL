@@ -19,7 +19,9 @@ CREATE TABLE profiles (
   name TEXT NOT NULL UNIQUE,
   description TEXT DEFAULT '',
   permissions_json TEXT NOT NULL DEFAULT '{}',
+  table_access_mode TEXT NOT NULL DEFAULT 'all',
   allowed_tables TEXT DEFAULT '',
+  column_permissions_json TEXT NOT NULL DEFAULT '{}',
   max_display_rows INTEGER NOT NULL DEFAULT 5000,
   max_page_size INTEGER NOT NULL DEFAULT 50,
   is_system INTEGER NOT NULL DEFAULT 0,
@@ -32,6 +34,7 @@ CREATE TABLE users (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   full_name TEXT,
+  email TEXT,
   profile_id INTEGER,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -50,14 +53,18 @@ PERMISSIONS = [
     "can_view_system_config",
 ]
 
+EMPTY_COLUMN_PERMISSIONS = json.dumps({})
+
 profiles = [
     (
         "admin",
         "Administrador total de la plataforma.",
         json.dumps({k: True for k in PERMISSIONS}),
+        "all",
         "",
+        EMPTY_COLUMN_PERMISSIONS,
         5000,
-        200,
+        50,
         1,
     ),
     (
@@ -72,9 +79,11 @@ profiles = [
             "can_view_audit": False,
             "can_view_system_config": True,
         }),
+        "all",
         "",
+        EMPTY_COLUMN_PERMISSIONS,
         5000,
-        100,
+        50,
         1,
     ),
     (
@@ -89,7 +98,9 @@ profiles = [
             "can_view_audit": False,
             "can_view_system_config": False,
         }),
+        "all",
         "",
+        EMPTY_COLUMN_PERMISSIONS,
         5000,
         50,
         1,
@@ -106,9 +117,11 @@ profiles = [
             "can_view_audit": True,
             "can_view_system_config": True,
         }),
+        "all",
         "",
+        EMPTY_COLUMN_PERMISSIONS,
         5000,
-        100,
+        50,
         1,
     ),
 ]
@@ -116,10 +129,10 @@ profiles = [
 cur.executemany(
     """
     INSERT INTO profiles(
-      name, description, permissions_json, allowed_tables,
+      name, description, permissions_json, table_access_mode, allowed_tables, column_permissions_json,
       max_display_rows, max_page_size, is_system
     )
-    VALUES (?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?)
     """,
     profiles,
 )
@@ -130,14 +143,14 @@ cur.execute("SELECT id FROM profiles WHERE name='consulta'")
 consulta_profile_id = cur.fetchone()[0]
 
 users = [
-    ("admin", pbkdf2_sha256.hash("admin123"), "Administrador", admin_profile_id, 1),
-    ("doctor1", pbkdf2_sha256.hash("doctor123"), "Doctor Demo", consulta_profile_id, 1),
+    ("admin", pbkdf2_sha256.hash("admin123"), "Administrador", "gilgustavo062@gmail.com", admin_profile_id, 1),
+    ("doctor1", pbkdf2_sha256.hash("doctor123"), "Doctor Demo", None, consulta_profile_id, 1),
 ]
 
 cur.executemany(
     """
-    INSERT INTO users(username, password_hash, full_name, profile_id, is_active)
-    VALUES (?,?,?,?,?)
+    INSERT INTO users(username, password_hash, full_name, email, profile_id, is_active)
+    VALUES (?,?,?,?,?,?)
     """,
     users,
 )
@@ -147,4 +160,5 @@ conn.close()
 
 print(f"OK: creado {db_path}")
 print("Usuarios: admin/admin123 , doctor1/doctor123")
-print("Acceso: ahora todo se controla por perfiles, no por roles.")
+print("Correo admin: gilgustavo062@gmail.com")
+print("Acceso: ahora todo se controla por perfiles, vistas y reglas por columnas, no por roles.")

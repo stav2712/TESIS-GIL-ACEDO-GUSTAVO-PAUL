@@ -31,6 +31,7 @@ type UserForm = {
   username: string;
   password: string;
   full_name: string;
+  email: string;
   profile_id: string;
 };
 
@@ -42,6 +43,7 @@ const emptyCreateForm: UserForm = {
   username: "",
   password: "",
   full_name: "",
+  email: "",
   profile_id: "",
 };
 
@@ -82,6 +84,7 @@ export default function UsersPage() {
         username: form.username.trim(),
         password: form.password,
         full_name: form.full_name.trim() || null,
+        email: form.email.trim() || null,
         profile_id: form.profile_id ? Number(form.profile_id) : null,
       });
       setForm(emptyCreateForm);
@@ -97,7 +100,7 @@ export default function UsersPage() {
     setMsg(null);
     try {
       await updateUser(userId, payload);
-      setMsg("Usuario actualizado. Si cambiaste su perfil, ese usuario debe volver a iniciar sesión.");
+      setMsg("Usuario actualizado. Si cambiaste su perfil o correo, ese usuario debe volver a iniciar sesión.");
       await load();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "No se pudo actualizar usuario");
@@ -111,6 +114,7 @@ export default function UsersPage() {
     setEditForm({
       username: user.username,
       full_name: user.full_name ?? "",
+      email: user.email ?? "",
       password: "",
       profile_id: profileValue(user),
       is_active: user.is_active,
@@ -133,12 +137,13 @@ export default function UsersPage() {
       await updateUser(editingUser.id, {
         username: editForm.username.trim(),
         full_name: editForm.full_name.trim() || null,
+        email: editForm.email.trim() || null,
         ...(editForm.password.trim() ? { password: editForm.password } : {}),
         ...(editForm.profile_id ? { profile_id: Number(editForm.profile_id) } : {}),
         is_active: editForm.is_active,
       });
       closeEdit();
-      setMsg("Usuario modificado correctamente. Si estaba conectado, debe volver a iniciar sesión para recibir permisos actualizados.");
+      setMsg("Usuario modificado correctamente. Si estaba conectado, debe volver a iniciar sesión para recibir datos y permisos actualizados.");
       await load();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "No se pudo modificar usuario");
@@ -153,12 +158,12 @@ export default function UsersPage() {
             <p className="text-sm uppercase tracking-[0.25em] text-[#0083B0] dark:text-lime-300 font-bold">Administración</p>
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Usuarios</h2>
             <p className="text-slate-500 dark:text-slate-400 mt-1">
-              Alta, edición, asignación de perfil y activación/desactivación. El perfil define todos los permisos.
+              Alta, edición, correo de reportes, asignación de perfil y activación/desactivación. El login sigue usando usuario y contraseña.
             </p>
           </div>
 
           <div className="flex gap-2 w-full sm:w-auto">
-            <TextInput className="sm:w-64" placeholder="Buscar usuario" value={q} onChange={(e) => setQ(e.target.value)} />
+            <TextInput className="sm:w-64" placeholder="Buscar usuario, nombre o correo" value={q} onChange={(e) => setQ(e.target.value)} />
             <button
               className="px-4 py-2.5 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition"
               onClick={() => load()}
@@ -182,6 +187,7 @@ export default function UsersPage() {
 
           <TextInput placeholder="Usuario" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} required />
           <TextInput placeholder="Nombre completo" value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
+          <TextInput placeholder="Correo para reportes" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
           <TextInput
             placeholder="Contraseña"
             type="password"
@@ -200,7 +206,7 @@ export default function UsersPage() {
           </SelectInput>
 
           <p className="text-xs text-[#005f80]/80 dark:text-slate-400">
-            Para crear un administrador, asígnale el perfil <b>admin</b> o un perfil con permisos administrativos.
+            El correo no cambia el inicio de sesión. Solo se usa para enviar exportaciones del reporte al usuario conectado.
           </p>
 
           <button className="w-full px-4 py-3 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition" type="submit">
@@ -218,6 +224,7 @@ export default function UsersPage() {
               <thead className="bg-[#0083B0] text-white text-left">
                 <tr>
                   <th className="p-3">Usuario</th>
+                  <th className="p-3">Correo</th>
                   <th className="p-3">Perfil</th>
                   <th className="p-3">Estado</th>
                   <th className="p-3">Acciones</th>
@@ -229,6 +236,10 @@ export default function UsersPage() {
                     <td className="p-3">
                       <div className="font-bold text-slate-900 dark:text-white">{u.username}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{u.full_name || "Sin nombre"}</div>
+                    </td>
+                    <td className="p-3 min-w-56">
+                      <div className="text-slate-700 dark:text-slate-200">{u.email || "Sin correo"}</div>
+                      {!u.email && <div className="text-xs text-amber-600 dark:text-amber-300">No recibirá reportes por correo.</div>}
                     </td>
                     <td className="p-3 min-w-44">
                       <SelectInput value={profileValue(u)} onChange={(e) => patchUser(u.id, { profile_id: Number(e.target.value) })}>
@@ -272,7 +283,7 @@ export default function UsersPage() {
 
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="p-6 text-center text-slate-500">
+                    <td colSpan={5} className="p-6 text-center text-slate-500">
                       No hay usuarios.
                     </td>
                   </tr>
@@ -311,6 +322,11 @@ export default function UsersPage() {
               </label>
 
               <label className="block">
+                <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Correo para reportes</span>
+                <TextInput type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} placeholder="usuario@dominio.com" />
+              </label>
+
+              <label className="block">
                 <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Nueva contraseña</span>
                 <TextInput
                   type="password"
@@ -345,7 +361,7 @@ export default function UsersPage() {
               </label>
 
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Si modificas perfil, estado o contraseña de un usuario que ya está conectado, pídele que cierre sesión y vuelva a entrar.
+                Si modificas perfil, estado, correo o contraseña de un usuario que ya está conectado, pídele que cierre sesión y vuelva a entrar.
               </p>
             </div>
 

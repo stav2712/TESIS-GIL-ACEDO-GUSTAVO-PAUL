@@ -1,0 +1,52 @@
+status,name,http_status,elapsed_ms,detail,url
+PASS,Identity /health,200,42,HTTP 200.,http://127.0.0.1:8002/health
+PASS,Orchestrator /health,200,5,HTTP 200.,http://127.0.0.1:8000/health
+PASS,Query service /health,200,6,HTTP 200.,http://127.0.0.1:8003/health
+PASS,Terminology /health,200,18,HTTP 200.,http://127.0.0.1:8004/health
+PASS,Login inválido debe rechazar credenciales,401,15,HTTP 401.,http://127.0.0.1:8002/auth
+PASS,Login admin/usuario de prueba,200,42,HTTP 200.,http://127.0.0.1:8002/auth
+PASS,/me con Bearer token,200,3,HTTP 200.,http://127.0.0.1:8002/me
+PASS,GET /users búsqueda con carácter regex '[' no debe caer,200,4,HTTP 200.,http://127.0.0.1:8002/users?q=%5B
+PASS,GET /profiles,200,25,HTTP 200.,http://127.0.0.1:8002/profiles
+PASS,GET /users,200,4,HTTP 200.,http://127.0.0.1:8002/users
+PASS,Usuario corto debe fallar,422,27,HTTP 422.,http://127.0.0.1:8002/users
+PASS,Usuario con símbolo inválido debe fallar,400,3,HTTP 400.,http://127.0.0.1:8002/users
+PASS,Contraseña corta debe fallar,422,2,HTTP 422.,http://127.0.0.1:8002/users
+PASS,Correo inválido debe fallar,400,26,HTTP 400.,http://127.0.0.1:8002/users
+PASS,profile_id no numérico debe fallar,422,3,HTTP 422.,http://127.0.0.1:8002/users
+PASS,full_name excedido debe fallar,422,3,HTTP 422.,http://127.0.0.1:8002/users
+PASS,Perfil max_page_size > 50 debe fallar,422,21,HTTP 422.,http://127.0.0.1:8002/profiles
+PASS,Perfil con tabla inválida debe fallar controlado,400,3,HTTP 400.,http://127.0.0.1:8002/profiles
+PASS,Crear usuario temporal,200,563,HTTP 200.,http://127.0.0.1:8002/users
+PASS,Editar usuario temporal y verificar actualización,200,18,HTTP 200.,http://127.0.0.1:8002/users/7
+PASS,Verificar datos editados,200,18,El PATCH persistió los campos.,http://127.0.0.1:8002/users/7
+PASS,Login usuario temporal antes de baja,200,35,HTTP 200.,http://127.0.0.1:8002/auth
+PASS,Dar de baja lógica usuario temporal,200,34,HTTP 200.,http://127.0.0.1:8002/users/7
+PASS,Login usuario dado de baja debe fallar,401,16,HTTP 401.,http://127.0.0.1:8002/auth
+PASS,Orchestrator rechaza sin token,401,14,HTTP 401.,http://127.0.0.1:8000/conversations
+PASS,GET /conversations,200,21,HTTP 200.,http://127.0.0.1:8000/conversations
+PASS,Crear conversación temporal,200,2,HTTP 200.,http://127.0.0.1:8000/conversations
+PASS,Obtener conversación temporal,200,2,HTTP 200.,http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38
+PASS,Renombrar conversación temporal,200,1,HTTP 200.,http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/rename
+PASS,Renombrar conversación con título excedido debe fallar,422,0,HTTP 422.,http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/rename
+PASS,Eliminar conversación temporal baja lógica,200,23,HTTP 200.,http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38/delete
+PASS,Conversación eliminada no debe recuperarse,404,1,HTTP 404.,http://127.0.0.1:8000/conversations/87677b08-5143-4314-9a99-6b70eb246a38
+PASS,GET /admin/dashboard,200,5,HTTP 200.,http://127.0.0.1:8000/admin/dashboard
+PASS,GET /admin/audit/reports q='[' no debe romper regex,200,26,HTTP 200.,http://127.0.0.1:8000/admin/audit/reports?page=1&page_size=5&q=%5B
+PASS,GET /system/config,200,1,HTTP 200.,http://127.0.0.1:8000/system/config
+PASS,GET /system/schema,200,343,"HTTP 200. 502 indica que Query Service/BD no respondió, no necesariamente validación rota.",http://127.0.0.1:8000/system/schema
+PASS,GET /system/status,200,15701,HTTP 200.,http://127.0.0.1:8000/system/status
+PASS,PATCH /system/config inválido debe fallar validado,422,2,HTTP 422.,http://127.0.0.1:8000/system/config
+PASS,POST /query con pregunta vacía debe fallar,422,20,HTTP 422.,http://127.0.0.1:8000/query
+PASS,POST /query con page_size > 200 debe fallar,422,1,HTTP 422.,http://127.0.0.1:8000/query
+PASS,POST /query-jobs con conversation_id inválido debe fallar,422,15,HTTP 422.,http://127.0.0.1:8000/query-jobs
+PASS,Query /execute SELECT 1,200,16,HTTP 200.,http://127.0.0.1:8003/execute
+PASS,Bloquea DELETE,400,1,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea múltiples sentencias,400,1,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea pg_sleep,400,1,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea COPY,400,23,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea SELECT INTO,400,16,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea FOR UPDATE,400,2,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Bloquea tabla fuera de reporting permitido,400,13,HTTP 400.,http://127.0.0.1:8003/execute
+PASS,Query /execute page_size texto debe fallar validado,422,14,HTTP 422.,http://127.0.0.1:8003/execute
+PASS,Query /execute page fuera de rango debe fallar validado,422,15,HTTP 422.,http://127.0.0.1:8003/execute
