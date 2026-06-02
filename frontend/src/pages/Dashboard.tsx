@@ -770,7 +770,7 @@ export default function Dashboard() {
           ].join(" ")}
         >
           <div className="flex justify-between items-center mb-8">
-            <h1 className="text-2xl font-bold">empresa REPORTS</h1>
+            <h1 className="text-2xl font-bold">Clínica Veltra</h1>
             <button className="lg:hidden text-white hover:text-cyan-200" onClick={closeMenus} type="button">
               <span className="material-icons">close</span>
             </button>
@@ -1148,7 +1148,7 @@ export default function Dashboard() {
 
               <div className="bg-lime-200 dark:bg-slate-800 p-4 mt-4 rounded-lg flex items-center justify-between shadow-sm">
                 <input
-                  className="bg-transparent outline-none flex-1 text-lime-900 dark:text-slate-100 placeholder:text-lime-800/70 dark:placeholder:text-slate-400 disabled:opacity-60"
+                  className="text-lg bg-transparent outline-none flex-1 text-lime-950 dark:text-slate-100 placeholder:text-lime-800/70 dark:placeholder:text-slate-400 disabled:opacity-60"
                   placeholder={loading ? "Procesando consulta..." : "Consulta"}
                   value={nl}
                   disabled={loading}

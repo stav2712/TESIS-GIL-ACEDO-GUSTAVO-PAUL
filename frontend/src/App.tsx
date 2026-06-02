@@ -9,6 +9,7 @@ import UsersPage from "./pages/UsersPage";
 import ProfilesPage from "./pages/ProfilesPage";
 import AuditPage from "./pages/AuditPage";
 import SystemConfigPage from "./pages/SystemConfigPage";
+import TemplatesPage from "./pages/TemplatesPage";
 
 function Protected({ children }: { children: ReactNode }) {
   return isAuthed() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -70,6 +71,15 @@ export default function App() {
             <div className="consultas-embedded h-full min-h-0 overflow-hidden">
               <Dashboard />
             </div>
+          </WithPermissionShell>
+        }
+      />
+
+      <Route
+        path="/plantillas"
+        element={
+          <WithPermissionShell permission="can_query">
+            <TemplatesPage />
           </WithPermissionShell>
         }
       />

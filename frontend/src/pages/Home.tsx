@@ -79,8 +79,7 @@ export default function Home() {
             Hola, {user?.full_name || user?.username}.
           </h2>
           <p className="text-[#005f80]/90 dark:text-slate-300 mt-3 max-w-3xl font-medium">
-            Esta pantalla organiza el sistema como plataforma: consultas NL-to-SQL, administración de usuarios,
-            perfiles con restricciones, auditoría y configuración operativa.
+            Accede a consultas, plantillas, administración, auditoría y configuración operativa desde un mismo entorno.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <Link
@@ -90,6 +89,15 @@ export default function Home() {
               <span className="material-icons">query_stats</span>
               Ir a consultas
             </Link>
+            {hasPermission("can_query") && (
+              <Link
+                to="/plantillas"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-white/80 hover:bg-white text-[#006a90] font-bold transition"
+              >
+                <span className="material-icons">article</span>
+                Ver plantillas
+              </Link>
+            )}
           </div>
         </div>
       </section>
@@ -112,9 +120,18 @@ export default function Home() {
         <ModuleLink
           to="/consultas"
           icon="query_stats"
-          title="Módulo de consultas"
+          title="Consultas"
           description="Pregunta en lenguaje natural, revisa resultados paginados y exporta reportes."
         />
+
+        {hasPermission("can_query") && (
+          <ModuleLink
+            to="/plantillas"
+            icon="article"
+            title="Plantillas"
+            description="Guarda, comparte, copia y ejecuta consultas frecuentes."
+          />
+        )}
 
         {hasPermission("can_manage_users") && (
           <ModuleLink to="/usuarios" icon="group_add" title="Usuarios" description="Crea usuarios, cambia estado y perfil asignado." />
@@ -142,7 +159,7 @@ export default function Home() {
           <ModuleLink
             to="/configuracion"
             icon="settings"
-            title="Configuración del sistema"
+            title="Configuración"
             description="Consulta límites, endpoints internos, perfil de esquema y vistas permitidas."
           />
         )}

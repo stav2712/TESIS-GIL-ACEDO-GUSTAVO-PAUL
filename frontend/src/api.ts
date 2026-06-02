@@ -15,12 +15,18 @@ export type ReportMeta = {
   conversation_id: string;
   user_id?: number;
   username?: string | null;
+  full_name?: string | null;
   profile?: string | null;
   nl: string;
   sql: string;
   timestamp: string;
   latency_ms: number;
   feedback: "positive" | "negative" | null;
+  nl_normalized?: string | null;
+  schema_profile?: string | null;
+  resolved_terms?: unknown[];
+  resolved_values?: unknown[];
+  translator_strategy?: string | null;
 };
 
 export type ConversationDetail = {
@@ -206,6 +212,44 @@ export type SystemStatus = {
   services: SystemServiceStatus[];
 };
 
+export type TemplateVisibility = "private" | "shared";
+export type TemplateStatus = "draft" | "published";
+
+export type PlatformTemplate = {
+  template_id: string;
+  title: string;
+  description: string | null;
+  nl: string;
+  tags: string[];
+  visibility: TemplateVisibility;
+  status: TemplateStatus;
+  owner_user_id: number;
+  owner_username?: string | null;
+  owner_full_name?: string | null;
+  owner_profile?: string | null;
+  use_count: number;
+  fork_count: number;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+};
+
+export type PlatformTemplatePayload = {
+  title: string;
+  description?: string | null;
+  nl: string;
+  tags?: string[];
+  visibility?: TemplateVisibility;
+  status?: TemplateStatus;
+};
+
+export type PlatformTemplateList = {
+  rows: PlatformTemplate[];
+  total_count: number;
+};
+
 export class ApiError extends Error {
   status: number;
   technicalDetail: unknown;
@@ -236,15 +280,20 @@ function fieldLabel(loc: unknown): string {
     email: "correo electrónico",
     profile_id: "perfil",
     name: "nombre",
+    title: "título",
     description: "descripción",
     permissions: "permisos",
     allowed_tables: "vistas permitidas",
     table_access_mode: "modo de acceso a vistas",
     column_permissions: "permisos por columna",
     max_page_size: "tamaño de página",
-    nl: "pregunta",
+    nl: "consulta",
     conversation_id: "conversación",
     report_id: "reporte",
+    template_id: "plantilla",
+    tags: "etiquetas",
+    visibility: "visibilidad",
+    status: "estado",
     value: "valor",
     formats: "formatos",
     page: "página",
@@ -283,12 +332,17 @@ function messageFromValidationErrors(errors: RawValidationError[]): string {
       : `El campo ${field} supera el tamaño máximo permitido.`;
   }
 
-  if (type.includes("int") || type.includes("float") || type.includes("number") || type.includes("greater_than") || type.includes("less_than")) {
+  if (
+    type.includes("int") ||
+    type.includes("float") ||
+    type.includes("number") ||
+    type.includes("greater_than") ||
+    type.includes("less_than")
+  ) {
     return `El campo ${field} debe tener un valor numérico válido dentro del rango permitido.`;
   }
 
   if (type.includes("bool")) return `El campo ${field} debe tener un valor válido.`;
-
   return "Revisa los campos ingresados. Hay datos obligatorios o con formato inválido.";
 }
 
@@ -338,20 +392,13 @@ function friendlyMessageFromPayload(status: number, parsed: unknown, raw: string
       return messageFromValidationErrors(nestedDetail as RawValidationError[]);
     }
 
-    if (typeof nestedError === "string" && !looksTechnical(nestedError)) {
-      return nestedError;
-    }
-
-    if (typeof nestedDetail === "string" && !looksTechnical(nestedDetail)) {
-      return nestedDetail;
-    }
-
+    if (typeof nestedError === "string" && !looksTechnical(nestedError)) return nestedError;
+    if (typeof nestedDetail === "string" && !looksTechnical(nestedDetail)) return nestedDetail;
     return friendlyFromStatus(status);
   }
 
   if (typeof detail === "string") {
     const text = detail.trim();
-
     try {
       const nested = JSON.parse(text);
       return friendlyMessageFromPayload(status, nested, text);
@@ -390,15 +437,12 @@ async function errorFromResponse(res: Response, url: string): Promise<ApiError> 
 
 export function toUserErrorMessage(error: unknown, fallback = "No se pudo completar la operación."): string {
   if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) {
-    return looksTechnical(error.message) ? fallback : error.message;
-  }
+  if (error instanceof Error) return looksTechnical(error.message) ? fallback : error.message;
   return fallback;
 }
 
 function sanitizeErrorText(text: string | null | undefined, fallback = "No se pudo completar la operación."): string | null {
   if (!text) return null;
-
   try {
     const parsed = JSON.parse(text);
     return friendlyMessageFromPayload(500, parsed, text);
@@ -422,7 +466,6 @@ function filenameFromDisposition(disposition: string | null, fallback: string) {
 
   const ascii = disposition.match(/filename="?([^"]+)"?/i);
   if (ascii?.[1]) return ascii[1];
-
   return fallback;
 }
 
@@ -461,7 +504,6 @@ export async function authLogin(username: string, password: string): Promise<str
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-
   return data.access_token;
 }
 
@@ -559,20 +601,10 @@ export async function selectConversationReport(conversationId: string, reportId:
 }
 
 // Query
-export async function runQuery(
-  nl: string,
-  conversationId: string | null,
-  page: number,
-  pageSize: number
-): Promise<QueryResponse> {
+export async function runQuery(nl: string, conversationId: string | null, page: number, pageSize: number): Promise<QueryResponse> {
   return request<QueryResponse>("/api/orchestrator/query", {
     method: "POST",
-    body: JSON.stringify({
-      nl,
-      conversation_id: conversationId,
-      page,
-      page_size: pageSize,
-    }),
+    body: JSON.stringify({ nl, conversation_id: conversationId, page, page_size: pageSize }),
   });
 }
 
@@ -584,12 +616,7 @@ export async function startQueryJob(
 ): Promise<QueryJobStart> {
   return request<QueryJobStart>("/api/orchestrator/query-jobs", {
     method: "POST",
-    body: JSON.stringify({
-      nl,
-      conversation_id: conversationId,
-      page,
-      page_size: pageSize,
-    }),
+    body: JSON.stringify({ nl, conversation_id: conversationId, page, page_size: pageSize }),
   });
 }
 
@@ -614,9 +641,7 @@ export async function getReportData(reportId: string, page: number, pageSize: nu
 
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   } catch (error) {
     console.error("[API network error]", { url, error });
     throw new ApiError("No se pudo conectar con el servidor. Verifica que los servicios estén ejecutándose.", 0, error);
@@ -643,9 +668,7 @@ export async function downloadExport(reportId: string, format: "csv" | "xlsx" | 
 
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   } catch (error) {
     console.error("[API network error]", { url, error });
     throw new ApiError("No se pudo conectar con el servidor. Verifica que los servicios estén ejecutándose.", 0, error);
@@ -659,14 +682,11 @@ export async function downloadExport(reportId: string, format: "csv" | "xlsx" | 
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-
   a.href = objectUrl;
   a.download = filenameFromDisposition(res.headers.get("Content-Disposition"), `reporte-${reportId}.${format}`);
-
   document.body.appendChild(a);
   a.click();
   a.remove();
-
   URL.revokeObjectURL(objectUrl);
 }
 
@@ -677,13 +697,52 @@ export type ReportEmailResponse = {
   attachments: string[];
 };
 
-export async function sendReportEmail(
-  reportId: string,
-  formats: ("csv" | "xlsx" | "pdf")[]
-): Promise<ReportEmailResponse> {
+export async function sendReportEmail(reportId: string, formats: ("csv" | "xlsx" | "pdf")[]): Promise<ReportEmailResponse> {
   return request<ReportEmailResponse>(`/api/orchestrator/reports/${reportId}/email`, {
     method: "POST",
     body: JSON.stringify({ formats }),
+  });
+}
+
+// Platform templates
+export async function listPlatformTemplates(params: { q?: string; tag?: string; mine?: boolean } = {}): Promise<PlatformTemplateList> {
+  const sp = new URLSearchParams();
+  if (params.q?.trim()) sp.set("q", params.q.trim());
+  if (params.tag?.trim()) sp.set("tag", params.tag.trim());
+  if (params.mine) sp.set("mine", "true");
+  const query = sp.toString();
+  return request<PlatformTemplateList>(`/api/platform/templates${query ? `?${query}` : ""}`);
+}
+
+export async function createPlatformTemplate(payload: PlatformTemplatePayload): Promise<PlatformTemplate> {
+  return request<PlatformTemplate>("/api/platform/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePlatformTemplate(templateId: string, payload: Partial<PlatformTemplatePayload>): Promise<PlatformTemplate> {
+  return request<PlatformTemplate>(`/api/platform/templates/${templateId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deletePlatformTemplate(templateId: string): Promise<void> {
+  await request(`/api/platform/templates/${templateId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function recordPlatformTemplateUse(templateId: string): Promise<void> {
+  await request(`/api/platform/templates/${templateId}/use`, {
+    method: "POST",
+  });
+}
+
+export async function forkPlatformTemplate(templateId: string): Promise<PlatformTemplate> {
+  return request<PlatformTemplate>(`/api/platform/templates/${templateId}/fork`, {
+    method: "POST",
   });
 }
 

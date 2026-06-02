@@ -19,6 +19,7 @@ type MenuItem = {
 const MENU_ITEMS: MenuItem[] = [
   { to: "/", label: "Panel", icon: "dashboard", end: true },
   { to: "/consultas", label: "Consultas", icon: "query_stats", permission: "can_query" },
+  { to: "/plantillas", label: "Plantillas", icon: "article", permission: "can_query" },
   { to: "/usuarios", label: "Usuarios", icon: "group_add", permission: "can_manage_users" },
   { to: "/perfiles", label: "Perfiles", icon: "admin_panel_settings", permission: "can_manage_profiles" },
   { to: "/auditoria", label: "Auditoría", icon: "manage_search", permission: "can_view_audit" },
@@ -56,8 +57,8 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
               <span className="material-icons">analytics</span>
             </div>
             <div className="leading-tight">
-              <h1 className="text-xl font-bold tracking-tight">empresa</h1>
-              <p className="text-sm font-semibold tracking-[0.25em] -mt-1">REPORTS</p>
+              <h1 className="text-xl font-bold tracking-tight">Clínica</h1>
+              <p className="text-sm font-semibold tracking-[0.25em] -mt-1">VELTRA</p>
             </div>
           </Link>
 
@@ -83,9 +84,7 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
             <div className="hidden md:flex items-center gap-3 bg-white/10 rounded-full pl-3 pr-1 py-1 text-white">
               <div className="text-right leading-tight">
                 <p className="text-sm font-bold">{user?.full_name || user?.username}</p>
-                <p className="text-[11px] text-cyan-50">
-                  {user?.profile ? `Perfil: ${user.profile}` : "Sin perfil asignado"}
-                </p>
+                <p className="text-[11px] text-cyan-50">{user?.profile ? `Perfil: ${user.profile}` : "Sin perfil asignado"}</p>
               </div>
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
                 <span className="material-icons text-[20px]">person</span>

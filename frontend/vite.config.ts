@@ -17,6 +17,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/orchestrator/, ""),
       },
+      "/api/platform": {
+        target: "http://127.0.0.1:8005",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/platform/, ""),
+      },
     },
   },
 });
