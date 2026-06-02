@@ -15,9 +15,47 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import engine, get_db
 from .guardrails import extract_tables, is_safe_select
+from .sql_repair import repair_sql_for_dialect
 
 app = FastAPI(title="Query Service")
 logger = logging.getLogger("query_service")
+
+
+ALLOWED = {
+    t.strip().lower()
+    for t in settings.ALLOWED_TABLES.split(",")
+    if t.strip()
+}
+
+
+class ExecuteIn(BaseModel):
+    sql: str = Field(min_length=1, max_length=50_000)
+    page: int = Field(default=1, ge=1, le=100_000)
+    page_size: int = Field(default=50, ge=1, le=1000)
+    # Máximo de filas navegables/visibles para UI.
+    # None o <=0 = sin límite visual; se usa para exportar todos los datos.
+    max_result_window: int | None = Field(default=None, ge=0, le=250_000)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning("Validation error in %s %s: %s", request.method, request.url.path, exc.errors())
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _friendly_validation_message(exc.errors()), "error_code": "VALIDATION_ERROR"},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error in %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "No se pudo ejecutar la consulta. Inténtalo nuevamente o contacta al administrador.",
+            "error_code": "INTERNAL_ERROR",
+        },
+    )
 
 
 def _validation_field_label(loc: tuple | list) -> str:
@@ -45,43 +83,6 @@ def _friendly_validation_message(errors: list[dict[str, Any]]) -> str:
     if "int" in kind or "float" in kind or "greater_than_equal" in kind or "less_than_equal" in kind:
         return f"El campo {field} debe tener un valor numérico válido dentro del rango permitido."
     return "Revisa los datos enviados. Hay campos obligatorios o con formato inválido."
-
-
-@app.exception_handler(RequestValidationError)
-async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.warning("Validation error in %s %s: %s", request.method, request.url.path, exc.errors())
-    return JSONResponse(
-        status_code=422,
-        content={"detail": _friendly_validation_message(exc.errors()), "error_code": "VALIDATION_ERROR"},
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled error in %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "No se pudo ejecutar la consulta. Inténtalo nuevamente o contacta al administrador.",
-            "error_code": "INTERNAL_ERROR",
-        },
-    )
-
-
-ALLOWED = {
-    t.strip().lower()
-    for t in settings.ALLOWED_TABLES.split(",")
-    if t.strip()
-}
-
-
-class ExecuteIn(BaseModel):
-    sql: str = Field(min_length=1, max_length=50_000)
-    page: int = Field(default=1, ge=1, le=100_000)
-    page_size: int = Field(default=50, ge=1, le=1000)
-    # Máximo de filas navegables/visibles para UI.
-    # None o <=0 = sin límite visual; se usa para exportar todos los datos.
-    max_result_window: int | None = Field(default=None, ge=0, le=250_000)
 
 
 @app.get("/health")
@@ -144,7 +145,8 @@ def schema_columns():
 
 @app.post("/execute")
 def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
-    sql = payload.sql.strip().rstrip(";")
+    original_sql = payload.sql.strip().rstrip(";")
+    sql = repair_sql_for_dialect(original_sql, settings.DB_DIALECT).strip().rstrip(";")
 
     if not is_safe_select(sql):
         raise HTTPException(400, "Solo SELECT seguro permitido")
@@ -241,8 +243,9 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
         original = getattr(e, "orig", None)
         detail = str(original) if original else str(e)
         logger.warning(
-            "SQL execution failed. detail=%s sql_original=%s sql_paged=%s",
+            "SQL execution failed. detail=%s sql_original=%s sql_repaired=%s sql_paged=%s",
             detail,
+            original_sql,
             sql_for_count,
             locals().get("sql_paged"),
         )
@@ -252,10 +255,11 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
             "La consulta generada no pudo ejecutarse correctamente. Reformula la pregunta o contacta al administrador.",
         )
 
-    except Exception as e:
+    except Exception:
         db.rollback()
         logger.exception(
-            "Unexpected SQL execution error. sql_original=%s sql_paged=%s",
+            "Unexpected SQL execution error. sql_original=%s sql_repaired=%s sql_paged=%s",
+            original_sql,
             sql_for_count,
             locals().get("sql_paged"),
         )

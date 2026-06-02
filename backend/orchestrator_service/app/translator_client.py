@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from .canonical_reports import canonical_sql_for_question
 from .config import settings
 
 
@@ -30,25 +31,34 @@ async def translate_nl_to_sql(
     resolved_values: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
-    Llama al endpoint real de Modal:
+    Llama al endpoint real de Modal, salvo para reportes canónicos críticos.
 
-    POST /translate
-    {
-      "question": "...",
-      "lang": "es",
-      "user_id": "..."
-    }
-
-    La API de Modal devuelve:
-    {
-      "sql": "...",
-      "latency_ms": ...,
-      "input_tokens": ...,
-      "output_tokens": ...,
-      "lang": "es",
-      "model_version": "..."
-    }
+    Los reportes canónicos evitan errores recurrentes del modelo en preguntas
+    muy claras y frecuentes, sin cambiar el flujo general NL-to-SQL.
     """
+    canonical = canonical_sql_for_question(nl)
+    if canonical is not None:
+        return {
+            "sql": canonical.sql,
+            "normalized": nl_normalized,
+            "resolved_terms": resolved_terms or [],
+            "resolved_values": resolved_values or [],
+            "schema_profile": schema_profile,
+            "strategy": "canonical_report",
+            "translator_payload": {
+                "question": nl,
+                "lang": lang,
+                "user_id": str(user_id),
+                "canonical_report_id": canonical.report_id,
+            },
+            "translator_response": {
+                "latency_ms": 0,
+                "input_tokens": None,
+                "output_tokens": None,
+                "lang": lang,
+                "model_version": canonical.description,
+            },
+        }
 
     payload = {
         "question": nl,

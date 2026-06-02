@@ -34,8 +34,8 @@ export default function Login() {
   return (
     <div className="h-screen flex flex-col items-center justify-center transition-colors duration-300 bg-[#0083B0] dark:bg-slate-900 font-['Montserrat']">
       <div className="mb-8 text-center text-white">
-        <h1 className="text-4xl font-bold tracking-tight">empresa</h1>
-        <h2 className="text-3xl font-normal tracking-wider">REPORTS</h2>
+        <h1 className="text-4xl font-bold tracking-tight">Clínica</h1>
+        <h2 className="text-3xl font-normal tracking-wider">VELTRA</h2>
       </div>
 
       <div className="w-full max-w-md p-8 rounded-lg shadow-xl transition-colors duration-300 bg-[#C6EB32] dark:bg-slate-800 dark:border dark:border-slate-700">
