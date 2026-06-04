@@ -8,7 +8,8 @@ from jose import JWTError, jwt
 
 from .config import settings
 
-ACL_VERSION = 6
+# v7: permisos separados para Plantillas e Historias Clinicas.
+ACL_VERSION = 7
 
 
 @dataclass(frozen=True)

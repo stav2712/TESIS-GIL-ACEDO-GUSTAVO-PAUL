@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -23,10 +24,16 @@ MIN_QUERY_TIMEOUT_SECONDS = 30.0
 MAX_QUERY_TIMEOUT_SECONDS = 900.0
 LOW_QUERY_TIMEOUT_WARNING_SECONDS = 60.0
 
+MAX_INSTITUTIONAL_NOTICE_LENGTH = 280
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1F\x7F]")
+
 _RUNTIME_KEYS = {
     "query_display_max_rows",
     "export_max_rows",
     "query_timeout_seconds",
+    "ui_language",
+    "default_theme",
+    "institutional_notice",
 }
 
 
@@ -34,6 +41,12 @@ class RuntimeConfig(BaseModel):
     query_display_max_rows: int = Field(ge=MIN_DISPLAY_ROWS, le=MAX_DISPLAY_ROWS)
     export_max_rows: int = Field(ge=0, le=MAX_EXPORT_ROWS)
     query_timeout_seconds: float = Field(ge=MIN_QUERY_TIMEOUT_SECONDS, le=MAX_QUERY_TIMEOUT_SECONDS)
+
+    # Configuración institucional no sensible. Se guarda junto con los límites existentes
+    # para no crear otro mecanismo de persistencia ni tocar secretos del .env.
+    ui_language: Literal["es", "en"] = "es"
+    default_theme: Literal["system", "light", "dark"] = "system"
+    institutional_notice: str = Field(default="", max_length=MAX_INSTITUTIONAL_NOTICE_LENGTH)
 
     @field_validator("export_max_rows")
     @classmethod
@@ -43,6 +56,18 @@ class RuntimeConfig(BaseModel):
                 f"Usa 0 para exportación sin límite o un valor >= {MIN_EXPORT_ROWS_WHEN_ENABLED}."
             )
         return value
+
+    @field_validator("institutional_notice")
+    @classmethod
+    def validate_institutional_notice(cls, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (value or "").strip())
+        if CONTROL_CHARS_RE.search(cleaned):
+            raise ValueError("El aviso institucional contiene caracteres no permitidos.")
+        if len(cleaned) > MAX_INSTITUTIONAL_NOTICE_LENGTH:
+            raise ValueError(
+                f"El aviso institucional no puede superar {MAX_INSTITUTIONAL_NOTICE_LENGTH} caracteres."
+            )
+        return cleaned
 
 
 def _settings_default_config() -> RuntimeConfig:
@@ -61,6 +86,9 @@ def _settings_default_config() -> RuntimeConfig:
         "query_display_max_rows": display_rows,
         "export_max_rows": export_rows,
         "query_timeout_seconds": timeout_seconds,
+        "ui_language": "es",
+        "default_theme": "system",
+        "institutional_notice": "",
     }
 
     return _validate_runtime_config(raw)
@@ -77,9 +105,10 @@ def _validate_runtime_config(raw: dict[str, Any]) -> RuntimeConfig:
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "Configuración operativa inválida",
+                "error": "Configuración del sistema inválida",
                 "detail": exc.errors(),
                 "limits": runtime_config_limits(),
+                "options": runtime_config_options(),
             },
         )
 
@@ -150,7 +179,6 @@ def update_runtime_config(patch: dict[str, Any]) -> RuntimeConfig:
         raw.update(clean_patch)
         next_config = _validate_runtime_config(raw)
         _persist_runtime_config(next_config)
-
         _runtime_config = next_config
         return _runtime_config.model_copy()
 
@@ -172,6 +200,23 @@ def runtime_config_limits() -> dict[str, dict[str, float | int]]:
             "max": MAX_QUERY_TIMEOUT_SECONDS,
             "warning_below": LOW_QUERY_TIMEOUT_WARNING_SECONDS,
         },
+        "institutional_notice": {
+            "max_length": MAX_INSTITUTIONAL_NOTICE_LENGTH,
+        },
+    }
+
+
+def runtime_config_options() -> dict[str, list[dict[str, str]]]:
+    return {
+        "ui_languages": [
+            {"value": "es", "label": "Español"},
+            {"value": "en", "label": "English"},
+        ],
+        "default_themes": [
+            {"value": "system", "label": "Según dispositivo"},
+            {"value": "light", "label": "Claro"},
+            {"value": "dark", "label": "Oscuro"},
+        ],
     }
 
 

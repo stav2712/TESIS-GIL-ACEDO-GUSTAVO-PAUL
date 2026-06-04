@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import engine, get_db
 from .guardrails import extract_tables, is_safe_select
+from .sql_order_scope_repair import repair_outer_order_by_dangling_qualifiers
 from .sql_repair import repair_sql_for_dialect
 
 app = FastAPI(title="Query Service")
 logger = logging.getLogger("query_service")
-
 
 ALLOWED = {
     t.strip().lower()
@@ -42,7 +42,10 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     logger.warning("Validation error in %s %s: %s", request.method, request.url.path, exc.errors())
     return JSONResponse(
         status_code=422,
-        content={"detail": _friendly_validation_message(exc.errors()), "error_code": "VALIDATION_ERROR"},
+        content={
+            "detail": _friendly_validation_message(exc.errors()),
+            "error_code": "VALIDATION_ERROR",
+        },
     )
 
 
@@ -80,7 +83,12 @@ def _friendly_validation_message(errors: list[dict[str, Any]]) -> str:
         return f"El campo {field} no puede estar vacío."
     if "string_too_long" in kind:
         return f"El campo {field} supera el tamaño máximo permitido."
-    if "int" in kind or "float" in kind or "greater_than_equal" in kind or "less_than_equal" in kind:
+    if (
+        "int" in kind
+        or "float" in kind
+        or "greater_than_equal" in kind
+        or "less_than_equal" in kind
+    ):
         return f"El campo {field} debe tener un valor numérico válido dentro del rango permitido."
     return "Revisa los datos enviados. Hay campos obligatorios o con formato inválido."
 
@@ -104,7 +112,6 @@ def _split_table_name(table: str) -> tuple[str | None, str]:
     cleaned = table.strip().strip('"')
     if "." not in cleaned:
         return None, cleaned
-
     schema, name = cleaned.split(".", 1)
     return schema.strip().strip('"') or None, name.strip().strip('"')
 
@@ -127,6 +134,7 @@ def schema_columns():
     Solo expone tablas/vistas incluidas en ALLOWED_TABLES.
     """
     inspector = inspect(engine)
+
     tables: dict[str, list[str]] = {}
     errors: dict[str, str] = {}
 
@@ -143,16 +151,21 @@ def schema_columns():
     return {"tables": tables, "errors": errors}
 
 
+def _repair_sql(sql: str) -> str:
+    repaired = repair_sql_for_dialect(sql, settings.DB_DIALECT)
+    repaired = repair_outer_order_by_dangling_qualifiers(repaired, settings.DB_DIALECT)
+    return repaired
+
+
 @app.post("/execute")
 def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
     original_sql = payload.sql.strip().rstrip(";")
-    sql = repair_sql_for_dialect(original_sql, settings.DB_DIALECT).strip().rstrip(";")
+    sql = _repair_sql(original_sql).strip().rstrip(";")
 
     if not is_safe_select(sql):
         raise HTTPException(400, "Solo SELECT seguro permitido")
 
     used = extract_tables(sql)
-
     if used and not used.issubset(ALLOWED):
         raise HTTPException(
             400,
@@ -236,10 +249,8 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
             "max_result_window_exceeded": bool(max_window and total_count > max_window),
             "result_message": _message(total_count, max_window),
         }
-
     except SQLAlchemyError as e:
         db.rollback()
-
         original = getattr(e, "orig", None)
         detail = str(original) if original else str(e)
         logger.warning(
@@ -249,12 +260,10 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
             sql_for_count,
             locals().get("sql_paged"),
         )
-
         raise HTTPException(
             422,
             "La consulta generada no pudo ejecutarse correctamente. Reformula la pregunta o contacta al administrador.",
         )
-
     except Exception:
         db.rollback()
         logger.exception(
@@ -263,7 +272,6 @@ def execute(payload: ExecuteIn, db: Session = Depends(get_db)):
             sql_for_count,
             locals().get("sql_paged"),
         )
-
         raise HTTPException(
             500,
             "No se pudo ejecutar la consulta por un error interno. Inténtalo nuevamente o contacta al administrador.",

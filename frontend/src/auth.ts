@@ -1,6 +1,13 @@
-const TOKEN_KEY = "empresa_reports_token_v6";
-const LEGACY_TOKEN_KEYS = ["empresa_reports_token", "empresa_reports_token_v2", "empresa_reports_token_v3", "empresa_reports_token_v4", "empresa_reports_token_v5"];
-const ACL_VERSION = 6;
+const TOKEN_KEY = "empresa_reports_token_v7";
+const LEGACY_TOKEN_KEYS = [
+  "empresa_reports_token",
+  "empresa_reports_token_v2",
+  "empresa_reports_token_v3",
+  "empresa_reports_token_v4",
+  "empresa_reports_token_v5",
+  "empresa_reports_token_v6",
+];
+const ACL_VERSION = 7;
 
 export type ColumnPermissionRule = {
   hidden?: string[];
@@ -85,9 +92,8 @@ export function getAuthUser(): AuthUser | null {
   if (!token) return null;
 
   const payload = decodePayload(token);
-
   // Fuerza login si queda un JWT viejo del sistema anterior o un token corrupto.
-  // Desde v6 el token también transporta correo, modo de acceso a vistas y reglas por columnas.
+  // Desde v7 el token transporta Plantillas e Historias Clinicas como permisos independientes.
   if (
     !payload ||
     !payload.sub ||

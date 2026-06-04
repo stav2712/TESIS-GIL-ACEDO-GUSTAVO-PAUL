@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+
 import httpx
 from fastapi import HTTPException
 
+from .canonical_missing_appointments import canonical_missing_appointments_sql_for_question
 from .canonical_reports import canonical_sql_for_question
 from .config import settings
 
@@ -18,6 +20,40 @@ def _translate_url() -> str:
     if not url.endswith("/translate"):
         url = f"{url}/translate"
     return url
+
+
+def _canonical_response(
+    *,
+    canonical,
+    nl: str,
+    user_id: int,
+    lang: str,
+    schema_profile: str | None,
+    nl_normalized: str | None,
+    resolved_terms: list[dict[str, Any]] | None,
+    resolved_values: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    return {
+        "sql": canonical.sql,
+        "normalized": nl_normalized,
+        "resolved_terms": resolved_terms or [],
+        "resolved_values": resolved_values or [],
+        "schema_profile": schema_profile,
+        "strategy": "canonical_report",
+        "translator_payload": {
+            "question": nl,
+            "lang": lang,
+            "user_id": str(user_id),
+            "canonical_report_id": canonical.report_id,
+        },
+        "translator_response": {
+            "latency_ms": 0,
+            "input_tokens": None,
+            "output_tokens": None,
+            "lang": lang,
+            "model_version": canonical.description,
+        },
+    }
 
 
 async def translate_nl_to_sql(
@@ -36,29 +72,21 @@ async def translate_nl_to_sql(
     Los reportes canónicos evitan errores recurrentes del modelo en preguntas
     muy claras y frecuentes, sin cambiar el flujo general NL-to-SQL.
     """
-    canonical = canonical_sql_for_question(nl)
+    canonical = canonical_missing_appointments_sql_for_question(nl)
+    if canonical is None:
+        canonical = canonical_sql_for_question(nl)
+
     if canonical is not None:
-        return {
-            "sql": canonical.sql,
-            "normalized": nl_normalized,
-            "resolved_terms": resolved_terms or [],
-            "resolved_values": resolved_values or [],
-            "schema_profile": schema_profile,
-            "strategy": "canonical_report",
-            "translator_payload": {
-                "question": nl,
-                "lang": lang,
-                "user_id": str(user_id),
-                "canonical_report_id": canonical.report_id,
-            },
-            "translator_response": {
-                "latency_ms": 0,
-                "input_tokens": None,
-                "output_tokens": None,
-                "lang": lang,
-                "model_version": canonical.description,
-            },
-        }
+        return _canonical_response(
+            canonical=canonical,
+            nl=nl,
+            user_id=user_id,
+            lang=lang,
+            schema_profile=schema_profile,
+            nl_normalized=nl_normalized,
+            resolved_terms=resolved_terms,
+            resolved_values=resolved_values,
+        )
 
     payload = {
         "question": nl,
@@ -71,13 +99,11 @@ async def translate_nl_to_sql(
     try:
         async with httpx.AsyncClient(timeout=settings.TRANSLATOR_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=payload)
-
     except httpx.TimeoutException as exc:
         raise HTTPException(
             status_code=504,
             detail=f"Timeout llamando al motor NL-to-SQL en Modal: {exc}",
         )
-
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,

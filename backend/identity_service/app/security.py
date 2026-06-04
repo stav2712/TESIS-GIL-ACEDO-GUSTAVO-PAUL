@@ -11,7 +11,9 @@ from .config import settings
 from .models import DEFAULT_PERMISSIONS, User, UserProfile
 
 pwd = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-ACL_VERSION = 6
+
+# v7: agrega permisos separados para Plantillas e Historias Clinicas.
+ACL_VERSION = 7
 
 
 def hash_password(p: str) -> str:
@@ -48,10 +50,9 @@ def profile_payload(profile: UserProfile | None) -> dict[str, Any]:
 def create_jwt(user: User) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     profile_data = profile_payload(user.profile_obj)
-
-    # El token ya no incluye `role`. El perfil es la única fuente de permisos.
-    # El máximo visualizable ya no viaja por perfil: es una política global del orquestador.
-    # acl_version=6 fuerza re-login para que viajen correo, modo de vistas y reglas por columnas.
+    # El token ya no incluye `role`. El perfil es la unica fuente de permisos.
+    # El maximo visualizable ya no viaja por perfil: es una politica global del orquestador.
+    # acl_version=7 fuerza re-login para que viajen los permisos separados nuevos.
     payload = {
         "sub": str(user.id),
         "username": user.username,
@@ -75,15 +76,7 @@ def decode_jwt(auth_header: str | None) -> dict[str, Any]:
     except JWTError:
         raise HTTPException(401, "Token inválido o expirado")
 
-    if payload.get("is_active") is False:
-        raise HTTPException(403, "Usuario inactivo")
-
     if int(payload.get("acl_version") or 0) < ACL_VERSION:
         raise HTTPException(401, "Token desactualizado. Vuelve a iniciar sesión")
 
     return payload
-
-
-def has_permission(payload: dict[str, Any], permission: str) -> bool:
-    permissions = payload.get("permissions") or {}
-    return bool(permissions.get(permission, False))

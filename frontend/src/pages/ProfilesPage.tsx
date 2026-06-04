@@ -7,14 +7,16 @@ import {
   updateProfile,
   type ColumnPermissions,
   type Profile,
-  type TableAccessMode,
   type SystemConfig,
   type SystemSchema,
+  type TableAccessMode,
 } from "../api";
 
 const PERMISSIONS = [
   ["can_query", "Consultar"],
   ["can_export", "Exportar"],
+  ["can_use_templates", "Plantillas"],
+  ["can_view_clinical_history", "Historias Clínicas"],
   ["can_view_sql", "Ver SQL generado"],
   ["can_manage_users", "Gestionar usuarios"],
   ["can_manage_profiles", "Gestionar perfiles"],
@@ -40,7 +42,7 @@ type ProfileDraft = {
 };
 
 function emptyPermissions() {
-  return Object.fromEntries(PERMISSIONS.map(([k]) => [k, false]));
+  return Object.fromEntries(PERMISSIONS.map(([key]) => [key, false]));
 }
 
 function normalizeName(value: string) {
@@ -74,7 +76,7 @@ function toDraft(profile?: Profile): ProfileDraft {
   return {
     name: profile?.name ?? "",
     description: profile?.description ?? "",
-    permissions: profile?.permissions ?? emptyPermissions(),
+    permissions: { ...emptyPermissions(), ...(profile?.permissions ?? {}) },
     allowed_tables: uniqueNormalized(profile?.allowed_tables),
     table_access_mode: profile?.table_access_mode === "custom" ? "custom" : "all",
     column_permissions: normalizeColumnPermissions(profile?.column_permissions),
@@ -86,8 +88,9 @@ function compactColumnPermissions(value: Record<string, ColumnRulesDraft>): Colu
   const compact: ColumnPermissions = {};
 
   for (const [table, rules] of Object.entries(value)) {
-    const hidden = uniqueNormalized(rules.hidden);
     const forbidden = uniqueNormalized(rules.forbidden);
+    const forbiddenSet = new Set(forbidden);
+    const hidden = uniqueNormalized(rules.hidden).filter((col) => !forbiddenSet.has(col));
 
     if (hidden.length || forbidden.length) {
       compact[table] = { hidden, forbidden };
@@ -99,6 +102,11 @@ function compactColumnPermissions(value: Record<string, ColumnRulesDraft>): Colu
 
 function countRules(rules: ColumnRulesDraft | undefined) {
   return (rules?.hidden.length ?? 0) + (rules?.forbidden.length ?? 0);
+}
+
+function clampPageSize(value: number) {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(1, Math.min(50, Math.trunc(value)));
 }
 
 export default function ProfilesPage() {
@@ -113,7 +121,7 @@ export default function ProfilesPage() {
   const [schemaMsg, setSchemaMsg] = useState<string | null>(null);
 
   const selectedProfile = useMemo(
-    () => (selectedId === "new" ? undefined : profiles.find((p) => p.id === selectedId)),
+    () => (selectedId === "new" ? undefined : profiles.find((profile) => profile.id === selectedId)),
     [profiles, selectedId]
   );
 
@@ -134,18 +142,18 @@ export default function ProfilesPage() {
   }, [schema?.tables, selectedColumnTable]);
 
   async function load() {
-    const [p, c] = await Promise.all([listProfiles(), getSystemConfig()]);
-    setProfiles(p);
-    setConfig(c);
+    const [profileList, systemConfig] = await Promise.all([listProfiles(), getSystemConfig()]);
+    setProfiles(profileList);
+    setConfig(systemConfig);
 
     try {
-      const s = await getSystemSchema();
-      setSchema(s);
-      if (Object.keys(s.errors ?? {}).length) {
-        setSchemaMsg("Algunas vistas no devolvieron columnas. Puedes guardar permisos de vistas igual.");
-      } else {
-        setSchemaMsg(null);
-      }
+      const systemSchema = await getSystemSchema();
+      setSchema(systemSchema);
+      setSchemaMsg(
+        Object.keys(systemSchema.errors ?? {}).length
+          ? "Algunas vistas no devolvieron columnas. Puedes guardar permisos de vistas igual."
+          : null
+      );
     } catch (ex) {
       setSchema(null);
       setSchemaMsg(ex instanceof Error ? ex.message : "No se pudieron cargar las columnas de las vistas.");
@@ -177,39 +185,38 @@ export default function ProfilesPage() {
       return;
     }
 
-    const profile = profiles.find((p) => p.id === next);
+    const profile = profiles.find((item) => item.id === next);
     setDraft(toDraft(profile));
   }
 
   function changePermission(key: string, checked: boolean) {
-    setDraft((d) => ({
-      ...d,
+    setDraft((current) => ({
+      ...current,
       permissions: {
-        ...d.permissions,
+        ...current.permissions,
         [key]: checked,
       },
     }));
   }
 
   function allowAllTables() {
-    setDraft((d) => ({ ...d, table_access_mode: "all", allowed_tables: [] }));
+    setDraft((current) => ({ ...current, table_access_mode: "all", allowed_tables: [] }));
   }
 
   function denyAllTables() {
-    setDraft((d) => ({ ...d, table_access_mode: "custom", allowed_tables: [] }));
+    setDraft((current) => ({ ...current, table_access_mode: "custom", allowed_tables: [] }));
   }
 
   function setTableAllowed(table: string, allowed: boolean) {
-    setDraft((d) => {
-      const current = new Set(d.table_access_mode === "custom" ? d.allowed_tables : allTables);
-      if (allowed) current.add(table);
-      else current.delete(table);
+    setDraft((current) => {
+      const selected = new Set(current.table_access_mode === "custom" ? current.allowed_tables : allTables);
+      if (allowed) selected.add(table);
+      else selected.delete(table);
 
-      const next = allTables.filter((item) => current.has(item));
       return {
-        ...d,
+        ...current,
         table_access_mode: "custom",
-        allowed_tables: next,
+        allowed_tables: allTables.filter((item) => selected.has(item)),
       };
     });
   }
@@ -221,7 +228,6 @@ export default function ProfilesPage() {
   function columnMode(table: string, column: string): ColumnMode {
     const rules = draft.column_permissions[table];
     const col = normalizeName(column);
-
     if (rules?.forbidden.includes(col)) return "forbidden";
     if (rules?.hidden.includes(col)) return "hidden";
     return "visible";
@@ -232,30 +238,29 @@ export default function ProfilesPage() {
     const col = normalizeName(column);
     if (!tableName || !col) return;
 
-    setDraft((d) => {
-      const current = d.column_permissions[tableName] ?? { hidden: [], forbidden: [] };
-      let hidden = uniqueNormalized(current.hidden).filter((x) => x !== col);
-      let forbidden = uniqueNormalized(current.forbidden).filter((x) => x !== col);
+    setDraft((current) => {
+      const existing = current.column_permissions[tableName] ?? { hidden: [], forbidden: [] };
+      let hidden = uniqueNormalized(existing.hidden).filter((item) => item !== col);
+      let forbidden = uniqueNormalized(existing.forbidden).filter((item) => item !== col);
 
       if (mode === "hidden") hidden = uniqueNormalized([...hidden, col]);
       if (mode === "forbidden") forbidden = uniqueNormalized([...forbidden, col]);
 
       const nextRules = { hidden, forbidden };
-      const nextPermissions = { ...d.column_permissions };
+      const nextColumnPermissions = { ...current.column_permissions };
+      if (countRules(nextRules)) nextColumnPermissions[tableName] = nextRules;
+      else delete nextColumnPermissions[tableName];
 
-      if (countRules(nextRules)) nextPermissions[tableName] = nextRules;
-      else delete nextPermissions[tableName];
-
-      return { ...d, column_permissions: nextPermissions };
+      return { ...current, column_permissions: nextColumnPermissions };
     });
   }
 
   function clearColumnRules(table: string) {
     const tableName = normalizeName(table);
-    setDraft((d) => {
-      const next = { ...d.column_permissions };
+    setDraft((current) => {
+      const next = { ...current.column_permissions };
       delete next[tableName];
-      return { ...d, column_permissions: next };
+      return { ...current, column_permissions: next };
     });
   }
 
@@ -269,7 +274,7 @@ export default function ProfilesPage() {
       allowed_tables: draft.table_access_mode === "custom" ? draft.allowed_tables : [],
       table_access_mode: draft.table_access_mode,
       column_permissions: compactColumnPermissions(draft.column_permissions),
-      max_page_size: draft.max_page_size,
+      max_page_size: clampPageSize(draft.max_page_size),
     };
 
     try {
@@ -299,7 +304,7 @@ export default function ProfilesPage() {
         <p className="text-sm uppercase tracking-[0.25em] text-[#0083B0] dark:text-lime-300 font-bold">Seguridad</p>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Perfiles y permisos</h2>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Controla qué puede hacer cada perfil, qué vistas clínicas puede consultar y qué columnas se ocultan o bloquean por vista.
+          Controla permisos funcionales separados, vistas clínicas permitidas y reglas por columnas.
         </p>
       </section>
 
@@ -347,9 +352,7 @@ export default function ProfilesPage() {
               <span className="material-icons text-[#0083B0] dark:text-lime-300">admin_panel_settings</span>
               <h3 className="font-bold text-xl">{selectedId === "new" ? "Crear perfil" : `Editar ${selectedProfile?.name ?? "perfil"}`}</h3>
             </div>
-            {selectedProfile?.is_system && (
-              <span className="px-3 py-1 rounded-full bg-[#C6EB32]/40 text-[#005f80] text-xs font-bold">Sistema</span>
-            )}
+            {selectedProfile?.is_system && <span className="px-3 py-1 rounded-full bg-[#C6EB32]/40 text-[#005f80] text-xs font-bold">Sistema</span>}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
@@ -358,7 +361,7 @@ export default function ProfilesPage() {
               <input
                 className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
                 value={draft.name}
-                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))}
                 disabled={selectedId !== "new"}
                 placeholder="Ej. médico, auditor, analista"
               />
@@ -369,19 +372,15 @@ export default function ProfilesPage() {
               <input
                 className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950"
                 value={draft.description}
-                onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                onChange={(e) => setDraft((current) => ({ ...current, description: e.target.value }))}
                 placeholder="Descripción funcional del perfil"
               />
             </label>
 
 {/*             <div className="rounded-xl border border-cyan-100 dark:border-slate-800 bg-cyan-50/70 dark:bg-slate-950 px-4 py-3">
               <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Máximo visualizable</span>
-              <p className="text-2xl font-extrabold text-[#0083B0] dark:text-lime-300 mt-1">
-                {config?.query_display_max_rows ?? 5000}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Valor global definido en configuración del sistema. No se modifica por perfil para mantener una regla uniforme.
-              </p>
+              <p className="text-2xl font-extrabold text-[#0083B0] dark:text-lime-300 mt-1">{config?.query_display_max_rows ?? 5000}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Valor global definido en configuración del sistema.</p>
             </div>
 
             <label className="block">
@@ -392,21 +391,18 @@ export default function ProfilesPage() {
                 min={1}
                 max={50}
                 value={draft.max_page_size}
-                onChange={onPageSizeChange}
+                onChange={(e) => setDraft((current) => ({ ...current, max_page_size: clampPageSize(Number(e.target.value)) }))}
               />
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Recomendado: 50. El backend no permitirá superar 50 desde perfiles.
-              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">El backend no permitirá superar 50 desde perfiles.</p>
             </label> */}
           </div>
 
           <div className="mt-6">
             <h4 className="font-bold text-slate-900 dark:text-white">Permisos funcionales</h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              El permiso “Ver SQL generado” permite mostrar el SQL en auditoría y también incluirlo en la metadata de exportaciones Excel/PDF.
-              Sin ese permiso, el resultado puede verse o exportarse, pero el SQL queda oculto.
+              “Consultar” controla consultas e historial de reportes. “Plantillas” e “Historias Clínicas” son permisos independientes.
+              “Ver SQL generado” solo controla si el SQL se muestra en auditoría, reportes y metadata de exportación.
             </p>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
               {PERMISSIONS.map(([key, label]) => (
                 <label
@@ -430,7 +426,7 @@ export default function ProfilesPage() {
               <div>
                 <h4 className="font-bold text-slate-900 dark:text-white">Restricción de vistas clínicas</h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Permitir todas usa siempre la lista global. Si marcas o desmarcas tarjetas, el perfil queda restringido exactamente a esas vistas; si no marcas ninguna, no podrá consultar vistas clínicas.
+                  Permitir todas usa la lista global. Si marcas tarjetas, el perfil queda restringido exactamente a esas vistas.
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -480,7 +476,7 @@ export default function ProfilesPage() {
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-sm break-all">{table}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          {schema?.tables?.[table]?.length ?? 0} columnas {ruleCount ? `· ${ruleCount} reglas` : ""}
+                          {schema?.tables?.[table]?.length ?? 0} columnas{ruleCount ? ` · ${ruleCount} reglas` : ""}
                         </p>
                       </div>
                     </div>
@@ -513,11 +509,7 @@ export default function ProfilesPage() {
               </select>
             </div>
 
-            {!selectedColumnTable && (
-              <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-                Selecciona al menos una vista para configurar columnas.
-              </div>
-            )}
+            {!selectedColumnTable && <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">Selecciona al menos una vista para configurar columnas.</div>}
 
             {selectedColumnTable && (
               <div className="mt-4">

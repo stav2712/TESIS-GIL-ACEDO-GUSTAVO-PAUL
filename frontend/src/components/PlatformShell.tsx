@@ -1,40 +1,92 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { clearToken, getAuthUser, hasPermission } from "../auth";
-import { getTheme, toggleTheme } from "../theme";
+import { getPublicSystemConfig, type PublicSystemConfig } from "../systemConfigClient";
+import { applyDefaultTheme, getTheme, toggleTheme } from "../theme";
 
 type ShellProps = {
   children: ReactNode;
   fullBleed?: boolean;
 };
 
+type Lang = "es" | "en";
+
 type MenuItem = {
   to: string;
-  label: string;
+  label: Record<Lang, string>;
   icon: string;
   end?: boolean;
   permission?: string;
 };
 
 const MENU_ITEMS: MenuItem[] = [
-  { to: "/", label: "Panel", icon: "dashboard", end: true },
-  { to: "/consultas", label: "Consultas", icon: "query_stats", permission: "can_query" },
-  { to: "/historial-reportes", label: "Historial", icon: "history", permission: "can_query" },
-  { to: "/plantillas", label: "Plantillas", icon: "article", permission: "can_query" },
-  { to: "/usuarios", label: "Usuarios", icon: "group_add", permission: "can_manage_users" },
-  { to: "/perfiles", label: "Perfiles", icon: "admin_panel_settings", permission: "can_manage_profiles" },
-  { to: "/auditoria", label: "Auditoría", icon: "manage_search", permission: "can_view_audit" },
-  { to: "/configuracion", label: "Configuración", icon: "settings", permission: "can_view_system_config" },
+  { to: "/", label: { es: "Panel", en: "Dashboard" }, icon: "dashboard", end: true },
+  { to: "/consultas", label: { es: "Consultas", en: "Queries" }, icon: "query_stats", permission: "can_query" },
+  { to: "/historial-reportes", label: { es: "Historial", en: "History" }, icon: "history", permission: "can_query" },
+  { to: "/historias-clinicas", label: { es: "Historias Clínicas", en: "Clinical Records" }, icon: "assignment_ind", permission: "can_view_clinical_history" },
+  { to: "/plantillas", label: { es: "Plantillas", en: "Templates" }, icon: "article", permission: "can_use_templates" },
+  { to: "/usuarios", label: { es: "Usuarios", en: "Users" }, icon: "group_add", permission: "can_manage_users" },
+  { to: "/perfiles", label: { es: "Perfiles", en: "Profiles" }, icon: "admin_panel_settings", permission: "can_manage_profiles" },
+  { to: "/auditoria", label: { es: "Auditoría", en: "Audit" }, icon: "manage_search", permission: "can_view_audit" },
+  { to: "/configuracion", label: { es: "Configuración", en: "Settings" }, icon: "settings", permission: "can_view_system_config" },
 ];
+
+const TEXT: Record<Lang, { profile: string; noProfile: string; logout: string; theme: string; systemSubtitle: string }> = {
+  es: {
+    profile: "Perfil",
+    noProfile: "Sin perfil asignado",
+    logout: "Salir",
+    theme: "Tema",
+    systemSubtitle: "VELTRA",
+  },
+  en: {
+    profile: "Profile",
+    noProfile: "No profile assigned",
+    logout: "Log out",
+    theme: "Theme",
+    systemSubtitle: "VELTRA",
+  },
+};
 
 function canSee(item: MenuItem): boolean {
   return !item.permission || hasPermission(item.permission);
 }
 
+function normalizePublicConfig(config: PublicSystemConfig | null): PublicSystemConfig {
+  return {
+    ui_language: config?.ui_language === "en" ? "en" : "es",
+    default_theme: config?.default_theme === "dark" || config?.default_theme === "light" ? config.default_theme : "system",
+    institutional_notice: (config?.institutional_notice ?? "").trim(),
+  };
+}
+
 export default function PlatformShell({ children, fullBleed = false }: ShellProps) {
   const user = getAuthUser();
   const navigate = useNavigate();
-  const theme = getTheme();
+  const [publicConfig, setPublicConfig] = useState<PublicSystemConfig>(() => normalizePublicConfig(null));
+  const [theme, setThemeLabel] = useState(() => getTheme());
+
+  const lang = publicConfig.ui_language;
+  const text = TEXT[lang];
+  const announcement = publicConfig.institutional_notice;
+
+  async function loadPublicConfig() {
+    try {
+      const next = normalizePublicConfig(await getPublicSystemConfig());
+      setPublicConfig(next);
+      applyDefaultTheme(next.default_theme);
+      setThemeLabel(getTheme(next.default_theme));
+    } catch (error) {
+      console.error("[system public config]", error);
+    }
+  }
+
+  useEffect(() => {
+    loadPublicConfig();
+    const handler = () => loadPublicConfig();
+    window.addEventListener("system-config-updated", handler);
+    return () => window.removeEventListener("system-config-updated", handler);
+  }, []);
 
   const logout = () => {
     clearToken();
@@ -59,7 +111,7 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
             </div>
             <div className="leading-tight">
               <h1 className="text-xl font-bold tracking-tight">Clínica</h1>
-              <p className="text-sm font-semibold tracking-[0.25em] -mt-1">VELTRA</p>
+              <p className="text-sm font-semibold tracking-[0.25em] -mt-1">{text.systemSubtitle}</p>
             </div>
           </Link>
 
@@ -67,16 +119,16 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
             {MENU_ITEMS.filter(canSee).map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
                 <span className="material-icons text-[18px]">{item.icon}</span>
-                <span>{item.label}</span>
+                <span>{item.label[lang]}</span>
               </NavLink>
             ))}
           </nav>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => toggleTheme()}
+              onClick={() => setThemeLabel(toggleTheme())}
               className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
-              title={`Tema: ${theme}`}
+              title={`${text.theme}: ${theme}`}
               type="button"
             >
               <span className="material-icons">brightness_6</span>
@@ -85,7 +137,7 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
             <div className="hidden md:flex items-center gap-3 bg-white/10 rounded-full pl-3 pr-1 py-1 text-white">
               <div className="text-right leading-tight">
                 <p className="text-sm font-bold">{user?.full_name || user?.username}</p>
-                <p className="text-[11px] text-cyan-50">{user?.profile ? `Perfil: ${user.profile}` : "Sin perfil asignado"}</p>
+                <p className="text-[11px] text-cyan-50">{user?.profile ? `${text.profile}: ${user.profile}` : text.noProfile}</p>
               </div>
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
                 <span className="material-icons text-[20px]">person</span>
@@ -98,10 +150,19 @@ export default function PlatformShell({ children, fullBleed = false }: ShellProp
               type="button"
             >
               <span className="material-icons text-[18px]">logout</span>
-              <span className="hidden sm:inline">Salir</span>
+              <span className="hidden sm:inline">{text.logout}</span>
             </button>
           </div>
         </div>
+
+        {announcement && (
+          <div className="px-4 pb-3">
+            <div className="rounded-xl bg-[#C6EB32]/20 border border-[#C6EB32]/40 text-white px-4 py-2 text-sm font-semibold flex items-center gap-2">
+              <span className="material-icons text-[18px]">campaign</span>
+              <span>{announcement}</span>
+            </div>
+          </div>
+        )}
       </header>
 
       {fullBleed ? (

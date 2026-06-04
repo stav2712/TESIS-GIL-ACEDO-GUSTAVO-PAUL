@@ -1,21 +1,35 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import {
-
-  getSystemConfig,
-  getSystemStatus,
-  updateSystemConfig,
-  type SystemConfig,
-  type SystemServiceStatus,
-} from "../api";
+import { getSystemStatus, type SystemServiceStatus } from "../api";
 import { getAuthUser, hasPermission } from "../auth";
+import {
+  getSystemConfig,
+  updateSystemConfig,
+  type ConfigOption,
+  type SystemConfig,
+} from "../systemConfigClient";
 
 type ConfigDraft = {
   query_display_max_rows: number;
   export_max_rows: number;
   query_timeout_seconds: number;
+  ui_language: "es" | "en";
+  default_theme: "system" | "light" | "dark";
+  institutional_notice: string;
 };
 
 const EXPORT_PRESETS = [0, 1000, 5000, 10000, 50000, 100000];
+
+const FALLBACK_OPTIONS = {
+  ui_languages: [
+    { value: "es", label: "Español" },
+    { value: "en", label: "English" },
+  ],
+  default_themes: [
+    { value: "system", label: "Según dispositivo" },
+    { value: "light", label: "Claro" },
+    { value: "dark", label: "Oscuro" },
+  ],
+};
 
 function formatRows(value: number) {
   return value.toLocaleString("es-PE");
@@ -26,11 +40,17 @@ function configToDraft(config: SystemConfig): ConfigDraft {
     query_display_max_rows: config.query_display_max_rows,
     export_max_rows: config.export_max_rows,
     query_timeout_seconds: config.query_timeout_seconds,
+    ui_language: config.ui_language ?? "es",
+    default_theme: config.default_theme ?? "system",
+    institutional_notice: config.institutional_notice ?? "",
   };
 }
 
-function ConfigCard({ title, value, description, icon }: { title: string;
-value: string | number; description: string; icon: string }) {
+function optionLabel(options: ConfigOption[], value: string) {
+  return options.find((item) => item.value === value)?.label ?? value;
+}
+
+function ConfigCard({ title, value, description, icon }: { title: string; value: string | number; description: string; icon: string }) {
   return (
     <div className="rounded-2xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-5 shadow-xl shadow-cyan-950/10">
       <div className="flex items-center justify-between gap-3">
@@ -43,13 +63,11 @@ value: string | number; description: string; icon: string }) {
   );
 }
 
-function Notice({ tone, icon, children }: { tone: "info" | "success" |
-"warning" | "error"; icon: string; children: ReactNode }) {
+function Notice({ tone, icon, children }: { tone: "info" | "success" | "warning" | "error"; icon: string; children: ReactNode }) {
   const styles = {
     info: "bg-cyan-50 text-[#005f80] border-cyan-100 dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800",
     success: "bg-[#C6EB32]/30 text-[#005f80] border-[#C6EB32] dark:bg-lime-950/30 dark:text-lime-200 dark:border-lime-900",
     warning: "bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-100 dark:border-amber-900",
-
     error: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-100 dark:border-red-900",
   } as const;
 
@@ -80,17 +98,47 @@ function NumberField({
 }) {
   return (
     <label className="block">
-       <span className="text-sm font-bold text-slate-600 dark:text-slate-300">{label}</span>
-       <input
-          className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0083B0]"
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={Number.isFinite(value) ? value : 0}
-          onChange={(e) => onChange(Number(e.target.value))}
-       />
-       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{helper}</p>
+      <span className="text-sm font-bold text-slate-600 dark:text-slate-300">{label}</span>
+      <input
+        className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0083B0]"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{helper}</p>
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  helper,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: ConfigOption[];
+  helper: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-bold text-slate-600 dark:text-slate-300">{label}</span>
+      <select
+        className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0083B0]"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((item) => (
+          <option key={item.value} value={item.value}>{item.label}</option>
+        ))}
+      </select>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{helper}</p>
     </label>
   );
 }
@@ -98,16 +146,10 @@ function NumberField({
 function StatusPill({ service }: { service: SystemServiceStatus }) {
   return (
     <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3 border border-white/60 dark:border-slate-800">
-
       <div className="flex items-center justify-between gap-2">
         <dt className="text-slate-500 dark:text-slate-400 font-semibold">{service.label}</dt>
-        <span
-           className={[
-             "px-2 py-0.5 rounded-full text-[11px] font-bold",
-             service.ok ? "bg-[#C6EB32]/50 text-[#005f80]" : "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-100",
-           ].join(" ")}
-        >
-           {service.ok ? "OK" : "Revisar"}
+        <span className={["px-2 py-0.5 rounded-full text-[11px] font-bold", service.ok ? "bg-[#C6EB32]/50 text-[#005f80]" : "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-100"].join(" ")}>
+          {service.ok ? "OK" : "Revisar"}
         </span>
       </div>
       <dd className="font-mono break-all mt-1 text-xs text-slate-700 dark:text-slate-200">{service.configured_url}</dd>
@@ -126,14 +168,20 @@ export default function SystemConfigPage() {
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [lowTimeoutAccepted, setLowTimeoutAccepted] = useState(false);
+
   const user = getAuthUser();
   const canEditSystemConfig = user?.profile?.trim().toLowerCase() === "admin" || hasPermission("can_manage_profiles");
 
- async function loadConfig() {
-   const next = await getSystemConfig();
-   setConfig(next);
-   setDraft(configToDraft(next));
- }
+  const options = useMemo(() => ({
+    uiLanguages: config?.options?.ui_languages ?? FALLBACK_OPTIONS.ui_languages,
+    defaultThemes: config?.options?.default_themes ?? FALLBACK_OPTIONS.default_themes,
+  }), [config]);
+
+  async function loadConfig() {
+    const next = await getSystemConfig();
+    setConfig(next);
+    setDraft(configToDraft(next));
+  }
 
   async function loadStatus() {
     setChecking(true);
@@ -148,39 +196,39 @@ export default function SystemConfigPage() {
     }
   }
 
- useEffect(() => {
-   loadConfig()
-     .then(loadStatus)
-
+  useEffect(() => {
+    loadConfig()
+      .then(loadStatus)
       .catch((ex) => setErr(ex instanceof Error ? ex.message : "No se pudo cargar configuración"));
   }, []);
 
   const limits = config?.limits;
-  const displayMin = limits?.query_display_max_rows.min ?? 50;
-  const displayMax = limits?.query_display_max_rows.max ?? 100000;
-  const exportMinEnabled = limits?.export_max_rows.min_when_enabled ?? 100;
-  const exportMax = limits?.export_max_rows.max ?? 250000;
-  const timeoutMin = limits?.query_timeout_seconds.min ?? 5;
-  const timeoutMax = limits?.query_timeout_seconds.max ?? 900;
-  const timeoutWarningBelow = limits?.query_timeout_seconds.warning_below ??
-30;
+  const displayMin = limits?.query_display_max_rows?.min ?? 50;
+  const displayMax = limits?.query_display_max_rows?.max ?? 100000;
+  const exportMinEnabled = limits?.export_max_rows?.min_when_enabled ?? 100;
+  const exportMax = limits?.export_max_rows?.max ?? 250000;
+  const timeoutMin = limits?.query_timeout_seconds?.min ?? 30;
+  const timeoutMax = limits?.query_timeout_seconds?.max ?? 900;
+  const timeoutWarningBelow = limits?.query_timeout_seconds?.warning_below ?? 60;
+  const noticeMaxLength = limits?.institutional_notice?.max_length ?? 280;
 
-  const timeoutIsLow = Boolean(draft && draft.query_timeout_seconds <
-timeoutWarningBelow);
+  const timeoutIsLow = Boolean(draft && draft.query_timeout_seconds < timeoutWarningBelow);
   const hasChanges = useMemo(() => {
     if (!config || !draft) return false;
     return (
-       draft.query_display_max_rows !== config.query_display_max_rows ||
-       draft.export_max_rows !== config.export_max_rows ||
-       draft.query_timeout_seconds !== config.query_timeout_seconds
+      draft.query_display_max_rows !== config.query_display_max_rows ||
+      draft.export_max_rows !== config.export_max_rows ||
+      draft.query_timeout_seconds !== config.query_timeout_seconds ||
+      draft.ui_language !== config.ui_language ||
+      draft.default_theme !== config.default_theme ||
+      draft.institutional_notice !== (config.institutional_notice ?? "")
     );
   }, [config, draft]);
 
   function validateDraft(): string | null {
     if (!draft) return "La configuración aún no está lista.";
 
-    if (draft.query_display_max_rows < displayMin ||
-draft.query_display_max_rows > displayMax) {
+    if (draft.query_display_max_rows < displayMin || draft.query_display_max_rows > displayMax) {
       return `El límite visual debe estar entre ${formatRows(displayMin)} y ${formatRows(displayMax)}.`;
     }
 
@@ -188,13 +236,11 @@ draft.query_display_max_rows > displayMax) {
       return `El límite de exportación debe ser 0 o estar como máximo en ${formatRows(exportMax)}.`;
     }
 
-    if (draft.export_max_rows !== 0 && draft.export_max_rows <
-exportMinEnabled) {
+    if (draft.export_max_rows !== 0 && draft.export_max_rows < exportMinEnabled) {
       return `Para exportación usa 0 si no quieres límite o un valor desde ${formatRows(exportMinEnabled)}.`;
     }
 
-    if (draft.query_timeout_seconds < timeoutMin || draft.query_timeout_seconds
-> timeoutMax) {
+    if (draft.query_timeout_seconds < timeoutMin || draft.query_timeout_seconds > timeoutMax) {
       return `El timeout SQL debe estar entre ${timeoutMin} y ${timeoutMax} segundos.`;
     }
 
@@ -202,7 +248,11 @@ exportMinEnabled) {
       return "Confirma la advertencia de timeout bajo antes de guardar.";
     }
 
-      return null;
+    if (draft.institutional_notice.trim().length > noticeMaxLength) {
+      return `El aviso institucional no puede superar ${noticeMaxLength} caracteres.`;
+    }
+
+    return null;
   }
 
   async function onSubmit(e: FormEvent) {
@@ -210,18 +260,18 @@ exportMinEnabled) {
     setErr(null);
     setMsg(null);
 
-      if (!canEditSystemConfig) {
-        setErr("Solo un administrador puede modificar la configuración operativa.");
-        return;
-      }
+    if (!canEditSystemConfig) {
+      setErr("Solo un administrador puede modificar la configuración del sistema.");
+      return;
+    }
 
-      const validation = validateDraft();
-      if (validation) {
-        setErr(validation);
-        return;
-      }
+    const validation = validateDraft();
+    if (validation) {
+      setErr(validation);
+      return;
+    }
 
-      if (!draft) return;
+    if (!draft) return;
 
     try {
       setSaving(true);
@@ -229,11 +279,15 @@ exportMinEnabled) {
         query_display_max_rows: draft.query_display_max_rows,
         export_max_rows: draft.export_max_rows,
         query_timeout_seconds: draft.query_timeout_seconds,
+        ui_language: draft.ui_language,
+        default_theme: draft.default_theme,
+        institutional_notice: draft.institutional_notice.trim(),
       });
       setConfig(saved);
       setDraft(configToDraft(saved));
       setLowTimeoutAccepted(false);
-      setMsg("Configuración guardada. Se aplicará en las nuevas consultas, paginaciones y exportaciones.");
+      window.dispatchEvent(new Event("system-config-updated"));
+      setMsg("Configuración guardada. El idioma, tema predeterminado y aviso institucional se actualizarán para los usuarios al ingresar a la plataforma.");
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "No se pudo guardar configuración");
     } finally {
@@ -251,13 +305,11 @@ exportMinEnabled) {
 
   return (
     <>
-       <section className="rounded-3xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-6 shadow-xl shadow-cyan-950/10">
-         <p className="text-sm uppercase tracking-[0.25em] text-[#0083B0] dark:text-lime-300 font-bold">Sistema</p>
-         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Configuración operativa</h2>
-         <p className="text-slate-500 dark:text-slate-400 mt-1">
-           Ajusta límites globales de visualización, exportación y ejecución SQL
-sin exponer secretos del entorno.
-
+      <section className="rounded-3xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-6 shadow-xl shadow-cyan-950/10">
+        <p className="text-sm uppercase tracking-[0.25em] text-[#0083B0] dark:text-lime-300 font-bold">Sistema</p>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Configuración del sistema</h2>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
+          Ajusta los límites operativos existentes y las tres opciones institucionales configurables: idioma, tema predeterminado y aviso institucional.
         </p>
       </section>
 
@@ -266,164 +318,183 @@ sin exponer secretos del entorno.
 
       {config && draft && (
         <>
-           <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-             <ConfigCard
-               title="Límite visual"
-               value={formatRows(config.query_display_max_rows)}
-               description="Valor global para filas navegables/mostrables en UI; mínimo 50."
-               icon="table_rows"
-             />
-             <ConfigCard
-               title="Límite exportación"
-               value={config.export_max_rows === 0 ? "Sin límite" :
-formatRows(config.export_max_rows)}
-               description={config.export_max_rows_meaning}
-               icon="file_download"
-             />
-             <ConfigCard
-               title="Timeout SQL"
-               value={`${config.query_timeout_seconds}s`}
-               description="Tiempo máximo de espera del orquestador al ejecutar SQL."
-               icon="timer"
-             />
-           </section>
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+            <ConfigCard title="Límite visual" value={formatRows(config.query_display_max_rows)} description="Valor global para filas navegables/mostrables en UI; mínimo 50." icon="table_rows" />
+            <ConfigCard title="Límite exportación" value={config.export_max_rows === 0 ? "Sin límite" : formatRows(config.export_max_rows)} description={config.export_max_rows_meaning} icon="file_download" />
+            <ConfigCard title="Tema predeterminado" value={optionLabel(options.defaultThemes, config.default_theme)} description="Según dispositivo, claro u oscuro para usuarios sin preferencia manual." icon="contrast" />
+          </section>
 
           {canEditSystemConfig ? (
-          <form
-             onSubmit={onSubmit}
-             className="mt-6 rounded-2xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-5 shadow-xl shadow-cyan-950/10"
-          >
-             <div className="flex items-center justify-between gap-3 flex-wrap">
-               <div className="flex items-center gap-2">
-                 <span className="material-icons text-[#0083B0] dark:text-lime-300">tune</span>
-                 <div>
-                   <h3 className="font-bold text-xl text-slate-900 dark:text-white">Parámetros editables</h3>
-                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Guardar requiere perfil administrador o permiso de gestión
-de perfiles.
-                   </p>
-                 </div>
-               </div>
+            <form onSubmit={onSubmit} className="mt-6 rounded-2xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-5 shadow-xl shadow-cyan-950/10 space-y-7">
+              <section>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="material-icons text-[#0083B0] dark:text-lime-300">tune</span>
+                    <div>
+                      <h3 className="font-bold text-xl text-slate-900 dark:text-white">Parámetros operativos</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Se conserva la configuración existente de límites, exportación y timeout SQL.
+                      </p>
+                    </div>
+                  </div>
 
-              {hasChanges && <span className="px-3 py-1 rounded-full bg-[#C6EB32]/35 text-[#005f80] text-xs font-bold">Cambios sin guardar</span>}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
-              <NumberField
-                 label="Límite visual"
-                 value={draft.query_display_max_rows}
-                 min={displayMin}
-                 max={displayMax}
-                 step={50}
-                 helper={`Mínimo ${formatRows(displayMin)}. Afecta solo vista y paginación, no exportación.`}
-                 onChange={(value) => setDraft((d) => (d ? { ...d,
-query_display_max_rows: value } : d))}
-              />
-
-              <div>
-                <NumberField
-                  label="Límite exportación"
-                  value={draft.export_max_rows}
-                  min={0}
-                  max={exportMax}
-                  step={100}
-                  helper={`0 = sin límite. Si activas límite, usa al menos ${formatRows(exportMinEnabled)} filas.`}
-                  onChange={(value) => setDraft((d) => (d ? { ...d,
-export_max_rows: value } : d))}
-                />
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {EXPORT_PRESETS.map((preset) => (
-                     <button
-                       key={preset}
-                       type="button"
-                       onClick={() => setDraft((d) => (d ? { ...d,
-export_max_rows: preset } : d))}
-                       className={[
-                         "px-3 py-1.5 rounded-full text-xs font-bold border transition",
-                         draft.export_max_rows === preset
-                           ? "bg-[#0083B0] text-white border-[#0083B0]"
-                           : "bg-cyan-50 text-[#005f80] border-cyan-100 hover:bg-cyan-100 dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800",
-                       ].join(" ")}
-                     >
-                       {preset === 0 ? "Sin límite" : formatRows(preset)}
-                     </button>
-                  ))}
+                  {hasChanges && <span className="px-3 py-1 rounded-full bg-[#C6EB32]/35 text-[#005f80] text-xs font-bold">Cambios sin guardar</span>}
                 </div>
-              </div>
 
-              <NumberField
-                label="Timeout SQL"
-                value={draft.query_timeout_seconds}
-                min={timeoutMin}
-                max={timeoutMax}
-                step={5}
-                helper={`Debajo de ${timeoutWarningBelow}s requiere confirmación porque puede cortar consultas válidas.`}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
+                  <NumberField
+                    label="Límite visual"
+                    value={draft.query_display_max_rows}
+                    min={displayMin}
+                    max={displayMax}
+                    step={50}
+                    helper={`Mínimo ${formatRows(displayMin)}. Afecta solo vista y paginación, no exportación.`}
+                    onChange={(value) => setDraft((d) => (d ? { ...d, query_display_max_rows: value } : d))}
+                  />
 
-                onChange={(value) => {
-                  setDraft((d) => (d ? { ...d, query_timeout_seconds: value } :
-d));
-                  setLowTimeoutAccepted(false);
-                }}
-              />
-            </div>
-
-            {timeoutIsLow && (
-              <div className="mt-5 rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4">
-                <div className="flex items-start gap-3">
-                  <span className="material-icons text-amber-600 dark:text-amber-300">warning</span>
                   <div>
-                     <h4 className="font-bold text-amber-900 dark:text-amber-100">Timeout SQL bajo</h4>
-                     <p className="text-sm text-amber-800 dark:text-amber-100/90 mt-1">
-                       Con {draft.query_timeout_seconds}s una consulta pesada
-puede quedarse sin respuesta aunque la base de datos esté funcionando. Úsalo
-solo si necesitas cortar rápido consultas largas.
-                     </p>
-                     <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-100">
-                       <input
-                         type="checkbox"
-                         className="w-4 h-4 accent-amber-600"
-                         checked={lowTimeoutAccepted}
-                         onChange={(e) =>
-setLowTimeoutAccepted(e.target.checked)}
-                       />
-                       Entiendo el riesgo y quiero guardar este timeout.
-                     </label>
+                    <NumberField
+                      label="Límite exportación"
+                      value={draft.export_max_rows}
+                      min={0}
+                      max={exportMax}
+                      step={100}
+                      helper={`0 = sin límite. Si activas límite, usa al menos ${formatRows(exportMinEnabled)} filas.`}
+                      onChange={(value) => setDraft((d) => (d ? { ...d, export_max_rows: value } : d))}
+                    />
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {EXPORT_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setDraft((d) => (d ? { ...d, export_max_rows: preset } : d))}
+                          className={[
+                            "px-3 py-1.5 rounded-full text-xs font-bold border transition",
+                            draft.export_max_rows === preset
+                              ? "bg-[#0083B0] text-white border-[#0083B0]"
+                              : "bg-cyan-50 text-[#005f80] border-cyan-100 hover:bg-cyan-100 dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800",
+                          ].join(" ")}
+                        >
+                          {preset === 0 ? "Sin límite" : formatRows(preset)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <NumberField
+                    label="Timeout SQL"
+                    value={draft.query_timeout_seconds}
+                    min={timeoutMin}
+                    max={timeoutMax}
+                    step={5}
+                    helper={`Debajo de ${timeoutWarningBelow}s requiere confirmación porque puede cortar consultas válidas.`}
+                    onChange={(value) => {
+                      setDraft((d) => (d ? { ...d, query_timeout_seconds: value } : d));
+                      setLowTimeoutAccepted(false);
+                    }}
+                  />
+                </div>
+
+                {timeoutIsLow && (
+                  <div className="mt-5 rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="material-icons text-amber-600 dark:text-amber-300">warning</span>
+                      <div>
+                        <h4 className="font-bold text-amber-900 dark:text-amber-100">Timeout SQL bajo</h4>
+                        <p className="text-sm text-amber-800 dark:text-amber-100/90 mt-1">
+                          Con {draft.query_timeout_seconds}s una consulta pesada puede quedarse sin respuesta aunque la base de datos esté funcionando. Úsalo solo si necesitas cortar rápido consultas largas.
+                        </p>
+                        <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-100">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 accent-amber-600"
+                            checked={lowTimeoutAccepted}
+                            onChange={(e) => setLowTimeoutAccepted(e.target.checked)}
+                          />
+                          Entiendo el riesgo y quiero guardar este timeout.
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="border-t border-cyan-100 dark:border-slate-800 pt-6">
+                <div className="flex items-center gap-2">
+                  <span className="material-icons text-[#0083B0] dark:text-lime-300">display_settings</span>
+                  <div>
+                    <h3 className="font-bold text-xl text-slate-900 dark:text-white">Opciones institucionales</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Solo se agregan idioma, tema predeterminado y aviso institucional.
+                    </p>
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
+                  <SelectField
+                    label="Idioma de interfaz"
+                    value={draft.ui_language}
+                    options={options.uiLanguages}
+                    helper="Define las etiquetas generales de navegación de la plataforma."
+                    onChange={(value) => setDraft((d) => (d ? { ...d, ui_language: value as ConfigDraft["ui_language"] } : d))}
+                  />
+
+                  <SelectField
+                    label="Tema predeterminado"
+                    value={draft.default_theme}
+                    options={options.defaultThemes}
+                    helper="Según dispositivo, claro u oscuro. No elimina el botón manual de tema del usuario."
+                    onChange={(value) => setDraft((d) => (d ? { ...d, default_theme: value as ConfigDraft["default_theme"] } : d))}
+                  />
+                </div>
+
+                <label className="block mt-5">
+                  <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Aviso institucional</span>
+                  <textarea
+                    className="mt-1 w-full px-3 py-2.5 rounded-lg border border-cyan-100 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0083B0]"
+                    rows={3}
+                    maxLength={noticeMaxLength}
+                    value={draft.institutional_notice}
+                    placeholder="Ej. Plataforma académica en entorno de demostración institucional."
+                    onChange={(e) => setDraft((d) => (d ? { ...d, institutional_notice: e.target.value } : d))}
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Máximo {noticeMaxLength} caracteres. Si está vacío, no se muestra aviso global al ingresar.
+                  </p>
+                </label>
+              </section>
+
+              {config.warnings?.length ? (
+                <Notice tone="warning" icon="tips_and_updates">
+                  <ul className="list-disc pl-4 space-y-1">
+                    {config.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </Notice>
+              ) : null}
+
+              <div className="flex justify-end gap-3 flex-wrap border-t border-cyan-100 dark:border-slate-800 pt-5">
+                <button
+                  type="button"
+                  onClick={resetDraft}
+                  disabled={!hasChanges || saving}
+                  className="px-5 py-3 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-[#005f80] font-bold transition disabled:opacity-50 dark:bg-slate-950 dark:hover:bg-slate-800 dark:text-slate-200"
+                >
+                  Revertir
+                </button>
+                <button
+                  type="submit"
+                  disabled={!hasChanges || saving}
+                  className="px-5 py-3 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition disabled:opacity-60"
+                >
+                  {saving ? "Guardando..." : "Guardar configuración"}
+                </button>
               </div>
-            )}
-
-            {config.warnings?.length ? (
-              <Notice tone="warning" icon="tips_and_updates">
-                <ul className="list-disc pl-4 space-y-1">
-                  {config.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </Notice>
-            ) : null}
-
-            <div className="mt-6 flex justify-end gap-3 flex-wrap">
-              <button
-                type="button"
-                onClick={resetDraft}
-                disabled={!hasChanges || saving}
-                className="px-5 py-3 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-[#005f80] font-bold transition disabled:opacity-50 dark:bg-slate-950 dark:hover:bg-slate-800 dark:text-slate-200"
-              >
-                Revertir
-              </button>
-              <button
-                type="submit"
-                disabled={!hasChanges || saving}
-                className="px-5 py-3 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition disabled:opacity-60"
-              >
-                {saving ? "Guardando..." : "Guardar configuración"}
-              </button>
-            </div>
-          </form>
+            </form>
           ) : (
             <Notice tone="info" icon="visibility">
-              Puedes ver la configuración operativa, pero el formulario de parámetros editables está oculto porque tu perfil no tiene permisos administrativos.
+              Puedes ver la configuración del sistema, pero el formulario de parámetros editables está oculto porque tu perfil no tiene permisos administrativos.
             </Notice>
           )}
 
@@ -434,8 +505,7 @@ setLowTimeoutAccepted(e.target.checked)}
                 <div>
                   <h3 className="font-bold text-lg">Endpoints internos</h3>
                   <p className="text-xs text-[#005f80]/80 dark:text-slate-400">
-                     Útiles para diagnóstico; el navegador no los llama
-directamente.
+                    Útiles para diagnóstico; el navegador no los llama directamente.
                   </p>
                 </div>
               </div>
@@ -449,34 +519,28 @@ directamente.
               </button>
             </div>
 
-            {statusErr && <Notice tone="error"
-icon="sync_problem">{statusErr}</Notice>}
+            {statusErr && <Notice tone="error" icon="sync_problem">{statusErr}</Notice>}
 
             <dl className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4 text-sm">
               {services.length > 0 ? (
-                services.map((service) => <StatusPill key={service.key}
-service={service} />)
+                services.map((service) => <StatusPill key={service.key} service={service} />)
               ) : (
                 <>
                   <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3">
-                    <dt className="text-slate-500 font-semibold">Query
-
-service</dt>
-                      <dd className="font-mono break-all mt-1">{config.query_url}</dd>
-                    </div>
-                    <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3">
-                      <dt className="text-slate-500 font-semibold">Terminology
-service</dt>
-                      <dd className="font-mono break-all mt-1">{config.terminology_url}</dd>
-                    </div>
-                    <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3">
-                      <dt className="text-slate-500 font-semibold">Translator
-configurado</dt>
-                      <dd className="mt-1 font-bold">{config.translator_url_configured ? "Sí" : "No"}</dd>
-                    </div>
-                  </>
-               )}
-             </dl>
+                    <dt className="text-slate-500 font-semibold">Query service</dt>
+                    <dd className="font-mono break-all mt-1">{config.query_url}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3">
+                    <dt className="text-slate-500 font-semibold">Terminology service</dt>
+                    <dd className="font-mono break-all mt-1">{config.terminology_url}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white/75 dark:bg-slate-950 p-3">
+                    <dt className="text-slate-500 font-semibold">Translator configurado</dt>
+                    <dd className="mt-1 font-bold">{config.translator_url_configured ? "Sí" : "No"}</dd>
+                  </div>
+                </>
+              )}
+            </dl>
           </section>
 
           <section className="mt-6 rounded-2xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-5 shadow-xl shadow-cyan-950/10">
@@ -485,29 +549,27 @@ configurado</dt>
               <h3 className="font-bold text-lg text-slate-900 dark:text-white">Perfil de esquema activo</h3>
             </div>
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                <code className="mt-3 block text-xs rounded-lg bg-cyan-50 dark:bg-slate-950 p-3 break-all border border-cyan-100 dark:border-slate-800">
-                  {config.schema_profile_path}
-                </code>
+              <code className="mt-3 block text-xs rounded-lg bg-cyan-50 dark:bg-slate-950 p-3 break-all border border-cyan-100 dark:border-slate-800">
+                {config.schema_profile_path}
+              </code>
             </div>
           </section>
 
           <section className="mt-6 rounded-2xl bg-white dark:bg-slate-900 border border-cyan-100 dark:border-slate-800 p-5 shadow-xl shadow-cyan-950/10">
             <div className="flex items-center gap-2">
               <span className="material-icons text-[#0083B0] dark:text-lime-300">dataset</span>
-              <h3 className="font-bold text-lg">Vistas globalmente
-permitidas</h3>
+              <h3 className="font-bold text-lg">Vistas globalmente permitidas</h3>
             </div>
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {config.allowed_tables.map((t) => (
                 <code key={t} className="text-xs rounded-lg bg-cyan-50 dark:bg-slate-950 p-2 break-all border border-cyan-100 dark:border-slate-800">
                   {t}
                 </code>
-
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-      </>
-    );
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </>
+  );
 }

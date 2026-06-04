@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { hasPermission, isAuthed } from "./auth";
 import PlatformShell from "./components/PlatformShell";
 import AuditPage from "./pages/AuditPage";
+import ClinicalHistoryPage from "./pages/ClinicalHistoryPage";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -86,9 +87,18 @@ export default function App() {
       />
 
       <Route
+        path="/historias-clinicas"
+        element={
+          <WithPermissionShell permission="can_view_clinical_history">
+            <ClinicalHistoryPage />
+          </WithPermissionShell>
+        }
+      />
+
+      <Route
         path="/plantillas"
         element={
-          <WithPermissionShell permission="can_query">
+          <WithPermissionShell permission="can_use_templates">
             <TemplatesPage />
           </WithPermissionShell>
         }

@@ -8,7 +8,8 @@ from jose import JWTError, jwt
 
 from .config import settings
 
-ACL_VERSION = 6
+# v7: permisos separados para Plantillas e Historias Clinicas.
+ACL_VERSION = 7
 
 
 def _normalize_column_permissions(value: Any) -> dict[str, dict[str, list[str]]]:
@@ -105,7 +106,7 @@ def require_claims(auth_header: str | None) -> UserClaims:
         allowed_tables=[str(x).strip().lower() for x in allowed_tables if str(x).strip()],
         table_access_mode=table_access_mode,
         column_permissions=_normalize_column_permissions(payload.get("column_permissions") or {}),
-        # Política global: el máximo visualizable no se lee del perfil ni del token.
+        # Politica global: el maximo visualizable no se lee del perfil ni del token.
         max_display_rows=settings.QUERY_DISPLAY_MAX_ROWS,
         max_page_size=min(int(payload.get("max_page_size") or 50), 50),
     )
