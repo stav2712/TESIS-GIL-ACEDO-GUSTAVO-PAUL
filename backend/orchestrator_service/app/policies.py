@@ -11,11 +11,11 @@ from .security import UserClaims, require_permission
 
 IDENT = r'"?[A-Za-z_][A-Za-z0-9_]*"?'
 TABLE_RE = re.compile(
-    rf"\b(?:from|join)\s+(({IDENT}\.)?{IDENT})",
+    rf"\b(?:from|join)\s+(({IDENT}\s*\.\s*)?{IDENT})",
     flags=re.IGNORECASE,
 )
 TABLE_ALIAS_RE = re.compile(
-    rf"\b(?:from|join)\s+(({IDENT}\.)?{IDENT})(?:\s+(?:as\s+)?({IDENT}))?",
+    rf"\b(?:from|join)\s+(({IDENT}\s*\.\s*)?{IDENT})(?:\s+(?:as\s+)?({IDENT}))?",
     flags=re.IGNORECASE,
 )
 
@@ -48,6 +48,11 @@ SQL_KEYWORDS_AFTER_TABLE = {
     "having",
 }
 
+# PostgreSQL permite sintaxis como EXTRACT(YEAR FROM e.fecha_inicio). El FROM
+# dentro de esas funciones NO es un origen de tabla. Si el extractor lo trata
+# como tabla, aparece el falso positivo e.fecha_inicio en permisos globales.
+SOURCE_LIKE_FUNCTIONS = {"extract", "substring", "trim", "overlay"}
+
 
 # ---------- Análisis SQL liviano ----------
 def _analysis_sql(sql: str) -> str:
@@ -59,7 +64,7 @@ def _analysis_sql(sql: str) -> str:
 
 
 def _clean_identifier(identifier: str) -> str:
-    parts = [p.strip().strip('"').lower() for p in identifier.split(".")]
+    parts = [p.strip().strip('"').lower() for p in re.split(r"\s*\.\s*", identifier)]
     return ".".join(p for p in parts if p)
 
 
@@ -71,13 +76,51 @@ def _word_pattern(word: str) -> str:
     return rf'(?<![A-Za-z0-9_])"?{re.escape(word)}"?(?![A-Za-z0-9_])'
 
 
+def _enclosing_function_name_before_keyword(sql: str, keyword_start: int) -> str | None:
+    """Devuelve la función que contiene el keyword, si el keyword está dentro de func(...)."""
+    depth = 0
+    open_paren = -1
+
+    for idx in range(keyword_start - 1, -1, -1):
+        ch = sql[idx]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth == 0:
+                open_paren = idx
+                break
+            depth -= 1
+
+    if open_paren < 0:
+        return None
+
+    prefix = sql[:open_paren].rstrip()
+    match = re.search(r'("?[A-Za-z_][A-Za-z0-9_]*"?)\s*$', prefix)
+    if not match:
+        return None
+    return match.group(1).strip('"').lower()
+
+
+def _is_function_internal_from(sql: str, keyword_start: int) -> bool:
+    function_name = _enclosing_function_name_before_keyword(sql, keyword_start)
+    return bool(function_name and function_name in SOURCE_LIKE_FUNCTIONS)
+
+
+def _iter_table_matches(sql: str):
+    for match in TABLE_RE.finditer(sql):
+        # match.start() apunta al FROM/JOIN encontrado por TABLE_RE.
+        if _is_function_internal_from(sql, match.start()):
+            continue
+        yield match
+
+
 def extract_used_tables(sql: str) -> set[str]:
     s = _analysis_sql(sql)
     tables: set[str] = set()
-    for match in TABLE_RE.finditer(s):
+    for match in _iter_table_matches(s):
         table = _clean_identifier(match.group(1))
         # Si el modelo llegara a usar un CTE sin esquema, no lo bloqueamos aquí;
-        # query_service ya valida las vistas reales permitidas globalmente.
+        # query_service valida las vistas reales permitidas globalmente.
         if "." in table:
             tables.add(table)
     return tables
@@ -93,6 +136,9 @@ def _table_aliases(sql: str, used_tables: set[str]) -> dict[str, str]:
         aliases[_short_name(table)] = table
 
     for match in TABLE_ALIAS_RE.finditer(s):
+        if _is_function_internal_from(s, match.start()):
+            continue
+
         table = _clean_identifier(match.group(1))
         if table not in used_tables:
             continue
@@ -142,7 +188,10 @@ def _references_column(sql: str, table: str, column: str, used_tables: set[str])
 
 def _has_select_star(sql: str) -> bool:
     s = _analysis_sql(sql).lower()
-    return re.search(r"\bselect\s+\*\s+\bfrom\b", s) is not None or re.search(r"\bselect\b.*\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*\*", s, re.DOTALL) is not None
+    return (
+        re.search(r"\bselect\s+\*\s+\bfrom\b", s) is not None
+        or re.search(r"\bselect\b.*\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*\*", s, re.DOTALL) is not None
+    )
 
 
 def _split_select_items(sql: str) -> list[str]:
@@ -161,7 +210,7 @@ def _split_select_items(sql: str) -> list[str]:
             depth += 1
         elif ch == ")" and depth > 0:
             depth -= 1
-        elif depth == 0 and lower[i:i + 4] == "from" and (i == 0 or not lower[i - 1].isalnum()):
+        elif depth == 0 and lower[i : i + 4] == "from" and (i == 0 or not lower[i - 1].isalnum()):
             from_at = i
             break
         i += 1
@@ -169,7 +218,7 @@ def _split_select_items(sql: str) -> list[str]:
     if from_at is None:
         return []
 
-    raw = s[select_at + len("select"):from_at]
+    raw = s[select_at + len("select") : from_at]
     items: list[str] = []
     start = 0
     depth = 0
@@ -210,7 +259,12 @@ def _output_name_from_select_item(item: str) -> str | None:
     return token
 
 
-def _select_output_names_referencing(sql: str, table: str, columns: set[str], used_tables: set[str]) -> set[str]:
+def _select_output_names_referencing(
+    sql: str,
+    table: str,
+    columns: set[str],
+    used_tables: set[str],
+) -> set[str]:
     names: set[str] = set()
     aliases = _table_aliases(sql, used_tables)
     qualifiers = {alias for alias, alias_table in aliases.items() if alias_table == table}
@@ -289,7 +343,6 @@ def _forbidden_column_hits(sql: str, claims: UserClaims, used_tables: set[str]) 
 
 def ensure_sql_allowed_by_profile(sql: str, claims: UserClaims) -> None:
     used_tables = extract_used_tables(sql)
-
     if not used_tables:
         return
 

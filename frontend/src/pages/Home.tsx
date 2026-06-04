@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getAdminDashboard, type DashboardSummary } from "../api";
 import { getAuthUser, hasPermission } from "../auth";
@@ -61,11 +61,71 @@ export default function Home() {
   const user = getAuthUser();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
 
+  const canQuery = hasPermission("can_query");
+  const canExport = hasPermission("can_export");
+  const canManageUsers = hasPermission("can_manage_users");
+  const canManageProfiles = hasPermission("can_manage_profiles");
+  const canViewAudit = hasPermission("can_view_audit");
+  const canViewConfig = hasPermission("can_view_system_config");
+
+  const primaryAction = useMemo(() => {
+    if (canQuery) {
+      return {
+        to: "/consultas",
+        icon: "query_stats",
+        label: "Ir a consultas",
+        tone: "primary" as const,
+      };
+    }
+
+    if (canViewAudit) {
+      return {
+        to: "/auditoria",
+        icon: "manage_search",
+        label: "Ver auditoría",
+        tone: "primary" as const,
+      };
+    }
+
+    if (canViewConfig) {
+      return {
+        to: "/configuracion",
+        icon: "settings",
+        label: "Ver configuración",
+        tone: "primary" as const,
+      };
+    }
+
+    if (canManageUsers) {
+      return {
+        to: "/usuarios",
+        icon: "group_add",
+        label: "Gestionar usuarios",
+        tone: "primary" as const,
+      };
+    }
+
+    if (canManageProfiles) {
+      return {
+        to: "/perfiles",
+        icon: "admin_panel_settings",
+        label: "Gestionar perfiles",
+        tone: "primary" as const,
+      };
+    }
+
+    return null;
+  }, [canQuery, canViewAudit, canViewConfig, canManageUsers, canManageProfiles]);
+
   useEffect(() => {
-    if (hasPermission("can_view_audit")) {
+    if (canViewAudit) {
       getAdminDashboard().then(setSummary).catch(() => setSummary(null));
     }
-  }, []);
+  }, [canViewAudit]);
+
+  const queryDescription = canExport
+    ? "Pregunta en lenguaje natural, revisa un reporte organizado y exporta resultados."
+    : "Pregunta en lenguaje natural y revisa un reporte organizado según tu perfil.";
 
   return (
     <>
@@ -79,17 +139,31 @@ export default function Home() {
             Hola, {user?.full_name || user?.username}.
           </h2>
           <p className="text-[#005f80]/90 dark:text-slate-300 mt-3 max-w-3xl font-medium">
-            Accede a consultas, plantillas, administración, auditoría y configuración operativa desde un mismo entorno.
+            Accede únicamente a los módulos habilitados para tu perfil: consultas, historial de reportes, plantillas, administración,
+            auditoría y configuración operativa.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            <Link
-              to="/consultas"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition"
-            >
-              <span className="material-icons">query_stats</span>
-              Ir a consultas
-            </Link>
-            {hasPermission("can_query") && (
+            {primaryAction && (
+              <Link
+                to={primaryAction.to}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-[#0083B0] hover:bg-[#006a90] text-white font-bold transition"
+              >
+                <span className="material-icons">{primaryAction.icon}</span>
+                {primaryAction.label}
+              </Link>
+            )}
+
+            {canQuery && (
+              <Link
+                to="/historial-reportes"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-white/80 hover:bg-white text-[#006a90] font-bold transition"
+              >
+                <span className="material-icons">history</span>
+                Ver historial
+              </Link>
+            )}
+
+            {canQuery && (
               <Link
                 to="/plantillas"
                 className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-white/80 hover:bg-white text-[#006a90] font-bold transition"
@@ -117,14 +191,25 @@ export default function Home() {
       )}
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-        <ModuleLink
-          to="/consultas"
-          icon="query_stats"
-          title="Consultas"
-          description="Pregunta en lenguaje natural, revisa resultados paginados y exporta reportes."
-        />
+        {canQuery && (
+          <ModuleLink
+            to="/consultas"
+            icon="query_stats"
+            title="Consultas"
+            description={queryDescription}
+          />
+        )}
 
-        {hasPermission("can_query") && (
+        {canQuery && (
+          <ModuleLink
+            to="/historial-reportes"
+            icon="history"
+            title="Historial de reportes"
+            description="Consulta reportes generados anteriormente en un panel independiente, ordenado y exportable."
+          />
+        )}
+
+        {canQuery && (
           <ModuleLink
             to="/plantillas"
             icon="article"
@@ -133,11 +218,11 @@ export default function Home() {
           />
         )}
 
-        {hasPermission("can_manage_users") && (
+        {canManageUsers && (
           <ModuleLink to="/usuarios" icon="group_add" title="Usuarios" description="Crea usuarios, cambia estado y perfil asignado." />
         )}
 
-        {hasPermission("can_manage_profiles") && (
+        {canManageProfiles && (
           <ModuleLink
             to="/perfiles"
             icon="admin_panel_settings"
@@ -146,7 +231,7 @@ export default function Home() {
           />
         )}
 
-        {hasPermission("can_view_audit") && (
+        {canViewAudit && (
           <ModuleLink
             to="/auditoria"
             icon="manage_search"
@@ -155,7 +240,7 @@ export default function Home() {
           />
         )}
 
-        {hasPermission("can_view_system_config") && (
+        {canViewConfig && (
           <ModuleLink
             to="/configuracion"
             icon="settings"

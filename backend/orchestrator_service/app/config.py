@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     OPENAI_GUARD_FAIL_CLOSED: bool = False
 
     # =========================
+    # REPORT TITLES
+    # =========================
+    # Genera títulos de reporte reales para el chat. Si OpenAI no está
+    # configurado o falla, se usa un fallback local sin bloquear la consulta.
+    OPENAI_TITLE_ENABLED: bool = True
+    OPENAI_TITLE_MODEL: str = ""  # vacío = reutiliza OPENAI_GUARD_MODEL
+    OPENAI_TITLE_TIMEOUT_SECONDS: float = 6.0
+    OPENAI_TITLE_MAX_CHARS: int = 80
+
+    # =========================
     # EMAIL / SMTP
     # =========================
     SMTP_HOST: str = "smtp.gmail.com"

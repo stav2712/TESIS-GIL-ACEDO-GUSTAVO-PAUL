@@ -80,6 +80,7 @@ class QueryIn(BaseModel):
 class QueryOut(BaseModel):
     conversation_id: str
     report_id: str
+    report_title: str | None = None
     sql: str
     timestamp: str
     latency_ms: int
@@ -114,6 +115,7 @@ class QueryJobOut(BaseModel):
     job_id: str
     conversation_id: str
     nl: str
+    report_title: str | None = None
     page: int = 1
     page_size: int = 50
     status: str
@@ -199,6 +201,7 @@ class ReportMetaOut(BaseModel):
     report_id: str
     conversation_id: str
     nl: str
+    report_title: str | None = None
     sql: str
     timestamp: str
     latency_ms: int
@@ -231,6 +234,10 @@ class AuditReportOut(BaseModel):
     timestamp: str
     latency_ms: int
     feedback: str | None = None
+    # Nuevos campos no rompen clientes anteriores: el frontend viejo los ignora.
+    # Permiten auditar intentos fallidos que antes quedaban invisibles.
+    status: Literal["completed", "failed", "abandoned"] | str | None = "completed"
+    error: str | None = None
 
 
 class AuditListOut(BaseModel):

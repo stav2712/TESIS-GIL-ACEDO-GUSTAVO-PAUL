@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 from datetime import datetime
 from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-#from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table as PdfTable, TableStyle
+from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table as PdfTable, TableStyle
 
 
 def _safe_text(value: Any, max_len: int = 32000) -> str:
@@ -23,6 +23,15 @@ def _safe_text(value: Any, max_len: int = 32000) -> str:
         return ""
     text = str(value)
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+
+def _pdf_text(value: Any, max_len: int = 32000) -> str:
+    """Texto seguro para Paragraph de ReportLab.
+
+    ReportLab interpreta <, > y & como markup. Si los datos clínicos o el SQL
+    contienen esos caracteres sin escapar, el PDF puede romperse en generación.
+    """
+    return html.escape(_safe_text(value, max_len), quote=False).replace("\n", "<br/>")
 
 
 def _report_title(title: str | None) -> str:
@@ -210,94 +219,203 @@ def to_pdf_bytes(
         pagesize=landscape(A4),
         leftMargin=1.1 * cm,
         rightMargin=1.1 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=1.0 * cm,
+        topMargin=1.25 * cm,
+        bottomMargin=1.15 * cm,
+        title=_report_title(title),
+        author="Clínica Veltra",
     )
 
     styles = getSampleStyleSheet()
+    generated = generated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report_title = _report_title(title)
+    visible_columns = columns[:10]
+    visible_rows = rows[:350]
 
     title_style = ParagraphStyle(
-        "ReportTitle",
+        "VeltraReportTitle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor("#14532D"),
+        fontSize=19,
+        leading=23,
+        textColor=colors.HexColor("#005F80"),
         alignment=TA_LEFT,
         spaceAfter=8,
     )
-
+    subtitle_style = ParagraphStyle(
+        "VeltraSubtitle",
+        parent=styles["Normal"],
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#475569"),
+        alignment=TA_LEFT,
+    )
+    section_style = ParagraphStyle(
+        "VeltraSection",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#005F80"),
+        spaceBefore=10,
+        spaceAfter=6,
+    )
     normal_style = ParagraphStyle(
-        "NormalSmall",
+        "VeltraNormal",
         parent=styles["Normal"],
         fontSize=8,
-        leading=10,
+        leading=10.5,
         textColor=colors.HexColor("#334155"),
     )
-
-    cell_style = ParagraphStyle(
-        "Cell",
+    note_style = ParagraphStyle(
+        "VeltraNote",
+        parent=normal_style,
+        fontSize=7.3,
+        leading=9.2,
+        textColor=colors.HexColor("#64748B"),
+    )
+    card_label_style = ParagraphStyle(
+        "VeltraCardLabel",
         parent=styles["Normal"],
-        fontSize=7,
-        leading=8,
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#005F80"),
+        alignment=TA_CENTER,
+    )
+    card_value_style = ParagraphStyle(
+        "VeltraCardValue",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        textColor=colors.HexColor("#0F172A"),
+        alignment=TA_CENTER,
+    )
+    cell_style = ParagraphStyle(
+        "VeltraCell",
+        parent=styles["Normal"],
+        fontSize=6.6,
+        leading=7.8,
+        textColor=colors.HexColor("#334155"),
         wordWrap="CJK",
     )
-
     header_style = ParagraphStyle(
-        "HeaderCell",
+        "VeltraHeaderCell",
         parent=cell_style,
         fontName="Helvetica-Bold",
-        textColor=colors.HexColor("#1F2937"),
+        textColor=colors.HexColor("#005F80"),
+        alignment=TA_CENTER,
+    )
+    footer_style = ParagraphStyle(
+        "VeltraFooter",
+        parent=styles["Normal"],
+        fontSize=6.5,
+        leading=8,
+        textColor=colors.HexColor("#64748B"),
+        alignment=TA_RIGHT,
     )
 
-    generated = generated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    report_title = _report_title(title)
-    visible_columns = columns[:8]
-    visible_rows = rows[:300]
+    page_width, page_height = landscape(A4)
+    available_width = page_width - doc.leftMargin - doc.rightMargin
 
-    story: list[Any] = [
-        Paragraph(report_title, title_style),
-        Paragraph(f"<b>Generado:</b> {generated}", normal_style),
-        Paragraph(f"<b>Filas exportadas:</b> {len(rows)}", normal_style),
-    ]
+    def draw_page(canvas, document):
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#0083B0"))
+        canvas.rect(0, page_height - 0.45 * cm, page_width, 0.45 * cm, fill=1, stroke=0)
+        canvas.setFillColor(colors.HexColor("#C6EB32"))
+        canvas.rect(0, page_height - 0.45 * cm, 3.6 * cm, 0.45 * cm, fill=1, stroke=0)
+        canvas.setFont("Helvetica-Bold", 7.5)
+        canvas.setFillColor(colors.HexColor("#005F80"))
+        canvas.drawString(0.35 * cm, page_height - 0.29 * cm, "CLÍNICA VELTRA")
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawRightString(page_width - doc.rightMargin, 0.45 * cm, f"Página {document.page}")
+        footer = Paragraph("Reporte generado automáticamente por la plataforma NL-to-SQL. Revise permisos y contexto clínico antes de tomar decisiones.", footer_style)
+        footer.wrapOn(canvas, available_width - 1.5 * cm, 0.4 * cm)
+        footer.drawOn(canvas, doc.leftMargin, 0.35 * cm)
+        canvas.restoreState()
 
-    if max_rows is not None:
-        story.append(Paragraph(f"<b>Límite de exportación:</b> {max_rows}", normal_style))
+    story: list[Any] = []
+
+    meta_cards = PdfTable(
+        [
+            [
+                Paragraph("GENERADO", card_label_style),
+                Paragraph("FILAS EXPORTADAS", card_label_style),
+                Paragraph("COLUMNAS", card_label_style),
+                Paragraph("LÍMITE", card_label_style),
+            ],
+            [
+                Paragraph(_pdf_text(generated, 80), card_value_style),
+                Paragraph(f"{len(rows):,}".replace(",", "."), card_value_style),
+                Paragraph(str(len(columns)), card_value_style),
+                Paragraph("Sin límite" if max_rows in (None, 0) else str(max_rows), card_value_style),
+            ],
+        ],
+        colWidths=[available_width / 4] * 4,
+        hAlign="LEFT",
+    )
+    meta_cards.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ECFDF5")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BAE6FD")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BAE6FD")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    story.extend(
+        [
+            Paragraph("Reporte clínico y administrativo", subtitle_style),
+            Paragraph(_pdf_text(report_title, 220), title_style),
+            meta_cards,
+            Spacer(1, 8),
+        ]
+    )
 
     if nl:
-        story.extend([
-            Spacer(1, 6),
-            Paragraph("<b>Consulta en lenguaje natural</b>", normal_style),
-            Paragraph(_safe_text(nl, 1200), normal_style),
-        ])
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph("Consulta solicitada", section_style),
+                    Paragraph(_pdf_text(nl, 1600), normal_style),
+                ]
+            )
+        )
 
     if sql:
-        story.extend([
-            Spacer(1, 6),
-            Paragraph("<b>SQL generado</b>", normal_style),
-            Paragraph(_safe_text(sql, 1800), normal_style),
-        ])
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph("SQL generado", section_style),
+                    Paragraph(_pdf_text(sql, 2200), normal_style),
+                ]
+            )
+        )
 
-    story.append(Spacer(1, 10))
+    story.append(Paragraph("Resultados", section_style))
 
     if not visible_columns:
         story.append(Paragraph("Sin columnas para mostrar.", normal_style))
     elif not visible_rows:
         story.append(Paragraph("La consulta no devolvió filas.", normal_style))
     else:
-        data = [[Paragraph(_safe_text(c, 80), header_style) for c in visible_columns]]
+        data = [[Paragraph(_pdf_text(c, 90), header_style) for c in visible_columns]]
 
         for row in visible_rows:
-            data.append([Paragraph(_safe_text(row.get(c, ""), 180), cell_style) for c in visible_columns])
+            data.append([Paragraph(_pdf_text(row.get(c, ""), 220), cell_style) for c in visible_columns])
 
-        available_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin
         col_width = available_width / len(visible_columns)
-
-        table = PdfTable(data, colWidths=[col_width] * len(visible_columns), repeatRows=1)
+        table = PdfTable(data, colWidths=[col_width] * len(visible_columns), repeatRows=1, hAlign="LEFT")
         table.setStyle(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9F99D")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#005F80")),
                     ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -308,26 +426,20 @@ def to_pdf_bytes(
                 ]
             )
         )
-
         story.append(table)
 
+        notes: list[str] = []
         if len(columns) > len(visible_columns):
-            story.append(Spacer(1, 6))
-            story.append(
-                Paragraph(
-                    f"Nota: el PDF muestra las primeras {len(visible_columns)} columnas por legibilidad. Use Excel para revisar todas las columnas.",
-                    normal_style,
-                )
+            notes.append(
+                f"El PDF muestra las primeras {len(visible_columns)} columnas por legibilidad. Use Excel para revisar las {len(columns)} columnas completas."
             )
-
         if len(rows) > len(visible_rows):
-            story.append(Spacer(1, 6))
-            story.append(
-                Paragraph(
-                    f"Nota: el PDF muestra las primeras {len(visible_rows)} filas. Use Excel/CSV para revisar el total exportado.",
-                    normal_style,
-                )
+            notes.append(
+                f"El PDF muestra las primeras {len(visible_rows)} filas. Use Excel/CSV para revisar el total exportado."
             )
+        if notes:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(" ".join(_pdf_text(note, 500) for note in notes), note_style))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
     return out.getvalue()

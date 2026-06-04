@@ -46,6 +46,10 @@ TABLE_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+# PostgreSQL permite sintaxis como EXTRACT(YEAR FROM fecha_inicio) o
+# SUBSTRING(campo FROM ...). Ese FROM no introduce una tabla.
+SOURCE_LIKE_FUNCTIONS = {"extract", "substring", "trim", "overlay"}
+
 
 def _analysis_sql(sql: str) -> str:
     s = BLOCK_COMMENT_RE.sub(" ", sql)
@@ -101,6 +105,44 @@ def _skip_parentheses(s: str, i: int) -> int:
                 return i + 1
         i += 1
     return i
+
+
+def _enclosing_function_name_before_keyword(sql: str, keyword_start: int) -> str | None:
+    """Devuelve la función que contiene el keyword, si el keyword está dentro de func(...)."""
+    depth = 0
+    open_paren = -1
+
+    for idx in range(keyword_start - 1, -1, -1):
+        ch = sql[idx]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth == 0:
+                open_paren = idx
+                break
+            depth -= 1
+
+    if open_paren < 0:
+        return None
+
+    prefix = sql[:open_paren].rstrip()
+    match = re.search(r'("?[A-Za-z_][A-Za-z0-9_]*"?)\s*$', prefix)
+    if not match:
+        return None
+    return match.group(1).strip('"').lower()
+
+
+def _is_function_internal_from(sql: str, keyword_start: int) -> bool:
+    function_name = _enclosing_function_name_before_keyword(sql, keyword_start)
+    return bool(function_name and function_name in SOURCE_LIKE_FUNCTIONS)
+
+
+def _iter_table_matches(sql: str):
+    for match in TABLE_RE.finditer(sql):
+        # match.start() apunta al FROM/JOIN encontrado por TABLE_RE.
+        if _is_function_internal_from(sql, match.start()):
+            continue
+        yield match
 
 
 def extract_cte_names(sql: str) -> set[str]:
@@ -189,12 +231,13 @@ def extract_tables(sql: str) -> set[str]:
     """
     Extrae tablas/vistas reales usadas en FROM/JOIN.
     Ignora CTEs sin esquema, pero mantiene las vistas reales dentro de ellos.
+    Ignora FROM internos de funciones SQL como EXTRACT(YEAR FROM fecha).
     """
     s = _analysis_sql(sql)
     cte_names = extract_cte_names(s)
     tables: set[str] = set()
 
-    for match in TABLE_RE.finditer(s):
+    for match in _iter_table_matches(s):
         table_name = _clean_identifier(match.group(1))
         if not table_name:
             continue

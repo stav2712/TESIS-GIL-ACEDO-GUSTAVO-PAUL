@@ -2,14 +2,15 @@ import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { hasPermission, isAuthed } from "./auth";
 import PlatformShell from "./components/PlatformShell";
-import Dashboard from "./pages/Dashboard";
-import Login from "./pages/Login";
-import Home from "./pages/Home";
-import UsersPage from "./pages/UsersPage";
-import ProfilesPage from "./pages/ProfilesPage";
 import AuditPage from "./pages/AuditPage";
+import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+import ProfilesPage from "./pages/ProfilesPage";
+import ReportHistoryPage from "./pages/ReportHistoryPage";
 import SystemConfigPage from "./pages/SystemConfigPage";
 import TemplatesPage from "./pages/TemplatesPage";
+import UsersPage from "./pages/UsersPage";
 
 function Protected({ children }: { children: ReactNode }) {
   return isAuthed() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -71,6 +72,15 @@ export default function App() {
             <div className="consultas-embedded h-full min-h-0 overflow-hidden">
               <Dashboard />
             </div>
+          </WithPermissionShell>
+        }
+      />
+
+      <Route
+        path="/historial-reportes"
+        element={
+          <WithPermissionShell permission="can_query">
+            <ReportHistoryPage />
           </WithPermissionShell>
         }
       />

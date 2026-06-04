@@ -5,7 +5,7 @@ from time import perf_counter
 from fastapi import HTTPException
 
 from .config import settings
-from .logs_repo import MongoRepo, default_title
+from .logs_repo import MongoRepo
 from .nl_guard import NLGuardResult, ensure_valid_nl_query
 from .policies import (
     apply_column_permissions_to_result,
@@ -13,6 +13,7 @@ from .policies import (
     ensure_sql_allowed_by_profile,
     visible_sql,
 )
+from .report_title import generate_report_title
 from .runtime_config import get_runtime_config
 from .schema_loader import load_schema_profile
 from .security import UserClaims
@@ -43,6 +44,7 @@ async def run_query_flow(
     conversation_id: str | None,
     page: int,
     page_size: int,
+    report_title: str | None = None,
 ) -> dict:
     ensure_can_run_query(claims)
 
@@ -52,12 +54,14 @@ async def run_query_flow(
     # Se ejecuta antes de crear una conversación cuando se usa /query directo.
     guard_result = await ensure_valid_nl_query(nl, schema_context=schema)
 
+    clean_report_title = report_title or await generate_report_title(nl)
+
     if conversation_id:
         conv = repo.get_conversation(claims.user_id, conversation_id)
         if not conv:
             raise HTTPException(404, "Conversación no existe")
     else:
-        conv = repo.create_conversation(claims.user_id, default_title(nl))
+        conv = repo.create_conversation(claims.user_id, clean_report_title)
         conversation_id = conv["conversation_id"]
 
     t0 = perf_counter()
@@ -113,6 +117,7 @@ async def run_query_flow(
             "full_name": claims.full_name,
             "profile": claims.profile,
         },
+        report_title=clean_report_title,
     )
 
     conv2 = repo.get_conversation(claims.user_id, conversation_id)
@@ -120,6 +125,7 @@ async def run_query_flow(
     return {
         "conversation_id": conversation_id,
         "report_id": report_doc["report_id"],
+        "report_title": report_doc.get("report_title") or clean_report_title,
         "sql": visible_sql(sql, claims),
         "timestamp": report_doc["timestamp"],
         "latency_ms": latency_ms,

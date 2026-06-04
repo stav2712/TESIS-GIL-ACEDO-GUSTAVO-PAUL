@@ -19,6 +19,7 @@ type MenuItem = {
 const MENU_ITEMS: MenuItem[] = [
   { to: "/", label: "Panel", icon: "dashboard", end: true },
   { to: "/consultas", label: "Consultas", icon: "query_stats", permission: "can_query" },
+  { to: "/historial-reportes", label: "Historial", icon: "history", permission: "can_query" },
   { to: "/plantillas", label: "Plantillas", icon: "article", permission: "can_query" },
   { to: "/usuarios", label: "Usuarios", icon: "group_add", permission: "can_manage_users" },
   { to: "/perfiles", label: "Perfiles", icon: "admin_panel_settings", permission: "can_manage_profiles" },
