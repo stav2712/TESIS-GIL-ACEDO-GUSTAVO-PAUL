@@ -67,6 +67,7 @@ export default function Home() {
   const canManageProfiles = hasPermission("can_manage_profiles");
   const canViewAudit = hasPermission("can_view_audit");
   const canViewConfig = hasPermission("can_view_system_config");
+  const canViewClinicalHistory = hasPermission("can_view_clinical_history");
 
   const primaryAction = useMemo(() => {
     if (canQuery) {
@@ -206,6 +207,15 @@ export default function Home() {
             icon="history"
             title="Historial de reportes"
             description="Consulta reportes generados anteriormente en un panel independiente, ordenado y exportable."
+          />
+        )}
+
+        {canViewClinicalHistory && (
+          <ModuleLink
+            to="/historias-clínicas"
+            icon="assignment_ind"
+            title="Historias Clínicas"
+            description="Consulta y revisa información general sobre los pacientes."
           />
         )}
 
