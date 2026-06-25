@@ -1,0 +1,95 @@
+{
+  "fuente": {
+    "mongo_uri": "mongodb://localhost:27017",
+    "database": "nl2sql_logs",
+    "reports_collection": "queries",
+    "jobs_collection": "query_jobs"
+  },
+  "totales": {
+    "intentos_registrados": 158,
+    "reportes_completados": 97,
+    "intentos_no_completados": 61,
+    "por_estado": {
+      "completed": 97,
+      "failed": 61
+    }
+  },
+  "latencia_reportes_completados_ms": {
+    "count": 97,
+    "mean": 26667.62,
+    "median": 27936.0,
+    "p50": 27936.0,
+    "p90": 43674.4,
+    "p95": 73963.6,
+    "p99": 105879.68,
+    "min": 1242.0,
+    "max": 151016.0
+  },
+  "feedback": {
+    "sin_feedback": 82,
+    "positive": 13,
+    "negative": 2
+  },
+  "usuarios": {
+    "admin": 128,
+    "1": 15,
+    "tavo": 8,
+    "doctor1": 5,
+    "prueba": 1,
+    "doctor": 1
+  },
+  "vistas_reporting_mas_usadas": {
+    "reporting.vw_pacientes": 43,
+    "reporting.vw_diagnosticos": 27,
+    "reporting.vw_encuentros": 17,
+    "reporting.vw_defunciones": 14,
+    "reporting.vw_inmunizaciones": 7,
+    "reporting.vw_profesionales": 6,
+    "reporting.vw_paciente_360": 5,
+    "reporting.vw_medicamentos": 4,
+    "reporting.vw_reclamos": 4,
+    "reporting.vw_ubicaciones": 2,
+    "reporting.vw_procedimientos": 1,
+    "reporting.vw_centros_atencion": 1
+  },
+  "actividad_por_dia": {
+    "2026-05-15": {
+      "completed": 1
+    },
+    "2026-05-20": {
+      "completed": 7
+    },
+    "2026-05-21": {
+      "completed": 7
+    },
+    "2026-05-22": {
+      "completed": 7
+    },
+    "2026-05-23": {
+      "completed": 5
+    },
+    "2026-05-28": {
+      "completed": 3
+    },
+    "2026-05-29": {
+      "completed": 12,
+      "failed": 25
+    },
+    "2026-06-02": {
+      "completed": 5,
+      "failed": 15
+    },
+    "2026-06-03": {
+      "completed": 31,
+      "failed": 18
+    },
+    "2026-06-04": {
+      "completed": 15,
+      "failed": 3
+    },
+    "2026-06-05": {
+      "completed": 4
+    }
+  },
+  "nota": "Estas métricas son operativas y provienen de auditoría. No calculan Exact Match ni Execution Accuracy porque para ello se requiere SQL esperado o resultado esperado por consulta."
+}

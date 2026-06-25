@@ -6,6 +6,10 @@ import httpx
 from fastapi import HTTPException
 
 from .canonical_missing_appointments import canonical_missing_appointments_sql_for_question
+from .canonical_quality_reports import (
+    canonical_quality_sql_for_question,
+    should_skip_legacy_canonical_reports,
+)
 from .canonical_reports import canonical_sql_for_question
 from .config import settings
 
@@ -69,11 +73,19 @@ async def translate_nl_to_sql(
     """
     Llama al endpoint real de Modal, salvo para reportes canónicos críticos.
 
-    Los reportes canónicos evitan errores recurrentes del modelo en preguntas
-    muy claras y frecuentes, sin cambiar el flujo general NL-to-SQL.
+    Orden conservador:
+    1. Canónico de inasistencias ya existente.
+    2. Canónicos críticos estrictos, diseñados para preguntas que ya demostraron
+       fallos semánticos o de esquema.
+    3. Canónicos legacy ya existentes, salvo cuando un guard detecta una frase
+       de pacientes con diagnóstico clínico específico que podría caer en un
+       ranking genérico equivocado.
+    4. Traductor externo en Modal.
     """
     canonical = canonical_missing_appointments_sql_for_question(nl)
     if canonical is None:
+        canonical = canonical_quality_sql_for_question(nl)
+    if canonical is None and not should_skip_legacy_canonical_reports(nl):
         canonical = canonical_sql_for_question(nl)
 
     if canonical is not None:

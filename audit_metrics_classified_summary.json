@@ -1,0 +1,49 @@
+{
+  "totales_originales": {
+    "registros": 155,
+    "reportes_completados": 94,
+    "intentos_no_completados": 61
+  },
+  "clasificacion": {
+    "reporte_completado_outlier_latencia": 9,
+    "reporte_completado_valido": 6,
+    "desarrollo_pruebas": 135,
+    "no_completado_no_clasificado": 5
+  },
+  "muestra_recomendada_para_informe": {
+    "criterio": "Solo reportes completados válidos, excluyendo pruebas de desarrollo y outliers > 30s de latencia total",
+    "n": 6
+  },
+  "latencia_total_ms_muestra_recomendada": {
+    "count": 6,
+    "mean": 12066.0,
+    "median": 6802.5,
+    "p50": 6802.5,
+    "p90": 26962.5,
+    "p95": 28055.75,
+    "p99": 28930.35,
+    "min": 2405.0,
+    "max": 29149.0
+  },
+  "latencia_traductor_ms_muestra_recomendada": {
+    "count": 6,
+    "mean": 2114.65,
+    "median": 1903.16,
+    "p50": 1903.16,
+    "p90": 3519.87,
+    "p95": 3622.27,
+    "p99": 3704.2,
+    "min": 883.98,
+    "max": 3724.68
+  },
+  "feedback_reportes_completados": {
+    "sin_feedback": 80,
+    "positive": 12,
+    "negative": 2
+  },
+  "feedback_solo_valorados": {
+    "positive": 12,
+    "negative": 2
+  },
+  "interpretacion": "La auditoría completa no debe usarse como tasa de precisión del modelo. Debe reportarse como trazabilidad operativa. Para EM y EX se requiere un conjunto de prueba con SQL esperado o resultado esperado."
+}
