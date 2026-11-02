@@ -1,3 +1,16 @@
+import {
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { getAuthUser, hasPermission } from "../auth";
@@ -191,6 +204,55 @@ export default function Dashboard() {
 
   const currentColumns = useMemo(() => activeTable?.columns ?? [], [activeTable?.columns]);
 
+const chartData = useMemo(() => {
+    if (!activeTable?.rows.length) return [];
+
+    const cols = activeTable.columns;
+    const isId = (col: string) =>
+      /^id($|_)|(_id$)|uuid|codigo/i.test(col);
+
+    const numericCols = cols.filter(
+      (col) =>
+        !isId(col) &&
+        activeTable.rows.some(
+          (row) =>
+            row[col] !== null &&
+            row[col] !== "" &&
+            !Number.isNaN(Number(row[col]))
+        )
+    );
+
+    const valueCol =
+      numericCols.find((col) =>
+        /total|cantidad|conteo|count|valor|monto|costo|edad|promedio|porcentaje/i.test(col)
+      ) ?? numericCols[0];
+
+    if (!valueCol) return [];
+
+    const labelCol =
+      cols.find(
+        (col) =>
+          col !== valueCol &&
+          !isId(col) &&
+          /nombre|descripcion|diagnostico|enfermedad|categoria|tipo|estado|ciudad|genero|fecha|mes|año/i.test(col)
+      ) ??
+      cols.find(
+        (col) =>
+          col !== valueCol &&
+          !isId(col) &&
+          activeTable.rows.some((row) =>
+            Number.isNaN(Number(row[col]))
+          )
+      );
+
+    return activeTable.rows.slice(0, 10).map((row, index) => ({
+      label: labelCol
+        ? String(row[labelCol] ?? `Fila ${index + 1}`)
+        : valueCol,
+      value: Number(row[valueCol]),
+    }));
+  }, [activeTable]);
+
   const closeMenus = () => {
     setRightOpen(false);
   };
@@ -213,6 +275,10 @@ export default function Dashboard() {
       const storedPending = readPendingJob();
 
       if (storedPending) {
+        setActiveReportId(null);
+        window.scrollTo({
+          top: 0
+        });       
         setPendingJob(storedPending);
         setActiveConvId(storedPending.conversation_id);
         setLoadingLabel("Generando reporte");
@@ -398,8 +464,17 @@ export default function Dashboard() {
     if (!text || loading) return;
 
     setErr(null);
+
+    setActiveReportId(null);
+    setSelectedReportId(null);
+    setTablesById({});
+
     setLoadingLabel("Generando reporte");
     setLoading(true);
+
+    window.scrollTo({
+      top:0
+    });
 
     try {
       const size = activeReportId ? getReportPageSize(activeReportId) : DEFAULT_PAGE_SIZE;

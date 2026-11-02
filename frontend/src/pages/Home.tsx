@@ -200,10 +200,10 @@ export default function Home() {
         <div className="absolute bottom-0 right-10 hidden h-36 w-36 rounded-full bg-white/10 lg:block" />
         <div className="relative grid gap-8 lg:grid-cols-[1.45fr_0.75fr] lg:items-center">
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.22em] text-lime-100 ring-1 ring-white/15">
+            {/* <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.22em] text-lime-100 ring-1 ring-white/15">
               <span className="material-icons text-[17px]">verified_user</span>
               Plataforma clínica segura
-            </p>
+            </p> */}
             <h2 className="mt-5 max-w-4xl text-3xl font-black leading-tight tracking-tight sm:text-4xl lg:text-5xl">
               Hola, {user?.full_name || user?.username}. Gestiona reportes, plantillas, auditoría y permisos desde un solo lugar.
             </h2>

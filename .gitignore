@@ -179,3 +179,8 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+/output/doc
+/output/pdf
+/tmp/evidencias
+/tmp/manual
+/tmp/sustentacion

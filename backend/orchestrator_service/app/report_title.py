@@ -289,7 +289,10 @@ def _openai_messages(nl: str) -> list[dict[str, str]]:
         "diagnosticados con asma en el último año'. "
         "Usa estilo profesional y claro, por ejemplo: "
         "'Pacientes con tratamientos de menor costo', 'Pacientes con asma', "
-        "'Cobertura por pagador'."
+        "'Cobertura por pagador'." \
+        "'No combinar títulos aleatorios o generales, por ejemplo: Si se pide un reporte de pacientes recién nacidos, el título sería parecido a: Listado de pacientes recién nacidos.'" \
+        "Few shots:" \
+        "Solicitud: 'quiero un listado de pacientes con asma y diabetes' -> Título: 'Pacientes con asma y diabetes'" \
     )
     user = f"Solicitud original del usuario:\n{nl}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

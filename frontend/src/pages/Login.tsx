@@ -39,7 +39,7 @@ export default function Login() {
             <span className="material-icons text-4xl">analytics</span>
           </div>
           <div className="leading-tight">
-            <h1 className="text-2xl font-black tracking-tight">Clínica Veltra</h1>
+            <h1 className="text-2xl font-black tracking-tight">CALIDAD Y SALUD T&F</h1>
             <p className="text-sm font-black uppercase tracking-[0.28em] text-lime-100">Plataforma NL-to-SQL</p>
           </div>
         </div>
@@ -77,7 +77,7 @@ export default function Login() {
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-[#C6EB32] text-[#006a90] shadow-lg shadow-cyan-950/10">
               <span className="material-icons text-4xl">analytics</span>
             </div>
-            <h1 className="mt-4 text-3xl font-black text-slate-950 dark:text-white">Clínica Veltra</h1>
+            <h1 className="mt-4 text-3xl font-black text-slate-950 dark:text-white">CALIDAD Y SALUD T&F</h1>
             <p className="text-sm font-black uppercase tracking-[0.22em] text-[#0083B0] dark:text-lime-300">Plataforma NL-to-SQL</p>
           </div>
 

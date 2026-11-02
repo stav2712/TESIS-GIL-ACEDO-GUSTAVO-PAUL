@@ -118,7 +118,7 @@ const TEXT: Record<
   }
 > = {
   es: {
-    brandTitle: "Clínica Veltra",
+    brandTitle: "CALIDAD Y SALUD T&F",
     brandSubtitle: "Plataforma NL-to-SQL",
     operation: "Operación",
     workspace: "Trabajo clínico",
